@@ -63,6 +63,21 @@ export default function SettingsPage() {
                     </div>
                   )}
                 </Field>
+                {settings.apiKey && (
+                  <Field label="Workspace ID (only if your key needs it)" hint="Keys created at organisation level, not inside a workspace, must name a workspace. Find it in the Anthropic Console under Settings → Workspaces.">
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={settings.workspaceId ?? ""}
+                        onChange={(e) => setSettings({ workspaceId: e.target.value.trim() })}
+                        placeholder="wrkspc_01…"
+                        className="font-mono"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    )}
+                  </Field>
+                )}
                 {status?.accessCodeRequired && !settings.apiKey && (
                   <Field label="Access code" hint="This deployment protects its own AI key with an access code.">
                     {(id) => <Input id={id} type="password" value={settings.accessCode} onChange={(e) => setSettings({ accessCode: e.target.value })} />}
@@ -89,7 +104,7 @@ export default function SettingsPage() {
                   <b className="text-fg">1. Your key</b> if you enter one here (you pay for your own usage).
                 </p>
                 <p>
-                  <b className="text-fg">2. This site's key</b> if the deployment sets <code>ANTHROPIC_API_KEY</code>{status?.accessCodeRequired ? " and you enter its access code" : ""}. {status?.serverKey ? "This deployment has one." : "This deployment does not have one."}
+                  <b className="text-fg">2. This site's key</b> if the deployment sets <code>ANTHROPIC_API_KEY</code> (and <code>ANTHROPIC_WORKSPACE_ID</code> when that key isn't tied to a workspace){status?.accessCodeRequired ? " and you enter its access code" : ""}. {status?.serverKey ? "This deployment has one." : "This deployment does not have one."}
                 </p>
                 <p>
                   <b className="text-fg">3. Heuristic mode</b> otherwise: keyword-overlap scoring and template drafts that work offline, so every page stays usable.

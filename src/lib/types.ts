@@ -301,6 +301,7 @@ export interface UpskillReport {
 
 export interface Settings {
   apiKey: string;
+  workspaceId: string;
   accessCode: string;
   model: string;
   theme: "dark" | "light" | "system";

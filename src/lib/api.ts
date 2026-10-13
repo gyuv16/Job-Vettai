@@ -16,9 +16,11 @@ export class ApiError extends Error {
 
 /** POST JSON to one of our API routes, attaching the visitor's key/model/access code. */
 export async function api<T>(path: string, body: unknown): Promise<T> {
-  const { apiKey, accessCode, model } = useStore.getState().settings;
+  const { apiKey, workspaceId, accessCode, model } = useStore.getState().settings;
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (apiKey) headers["x-anthropic-key"] = apiKey;
+  // Saved settings from before this field existed have no workspaceId.
+  if (apiKey && workspaceId?.trim()) headers["x-anthropic-workspace"] = workspaceId.trim();
   if (accessCode) headers["x-access-code"] = accessCode;
   if (model) headers["x-claude-model"] = model;
   let res: Response;

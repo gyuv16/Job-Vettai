@@ -39,7 +39,7 @@ The API routes call Claude through the official Anthropic SDK with structured ou
 
 The engine is chosen per request:
 
-1. **The visitor's own API key**, if they enter one in Settings (stored only in their browser).
+1. **The visitor's own API key**, if they enter one in Settings (stored only in their browser), plus a Workspace ID if that key isn't tied to a workspace.
 2. **The deployment's key** (`ANTHROPIC_API_KEY`), optionally protected by an access code.
 3. **Heuristic mode** if neither is available: keyword-overlap scoring and template drafts, so the site is never broken.
 
@@ -54,6 +54,7 @@ Job postings, CVs and web pages are always treated as untrusted data: the prompt
    | Name | Required | Value |
    |---|---|---|
    | `ANTHROPIC_API_KEY` | Recommended | Your key from [console.anthropic.com](https://console.anthropic.com). Without it, visitors use their own key or heuristic mode. |
+   | `ANTHROPIC_WORKSPACE_ID` | Only if Anthropic asks for it | If you see "This API key is not scoped to a workspace", your key was created at organisation level. Set this to the workspace ID (`wrkspc_01…`, from Console → Settings → Workspaces), or create a new key inside a workspace instead. |
    | `APP_ACCESS_CODE` | Strongly recommended with a key | Any passphrase. Visitors must enter it in Settings before your key is used, so strangers cannot spend your credits. |
    | `ANTHROPIC_MODEL` | Optional | Defaults to `claude-opus-5-5`. Visitors can also pick a model in Settings. |
 

@@ -48,6 +48,7 @@ export const EMPTY_PROFILE: Profile = {
 
 export const DEFAULT_SETTINGS: Settings = {
   apiKey: "",
+  workspaceId: "",
   accessCode: "",
   model: "",
   theme: "dark",
