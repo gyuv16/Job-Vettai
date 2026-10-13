@@ -60,6 +60,8 @@ Job postings, CVs and web pages are always treated as untrusted data: the prompt
 
 4. Click **Deploy**. Your site is live at `https://<project>.vercel.app`.
 
+Changed or added an environment variable later (for example `ANTHROPIC_WORKSPACE_ID`)? Vercel only applies it to new deployments: open **Deployments**, choose the latest one, and click **Redeploy**.
+
 The AI routes set `maxDuration` up to 300 seconds; drafting with review and revision makes three sequential calls, so keep Vercel's Fluid Compute enabled (the default).
 
 ## Run locally
