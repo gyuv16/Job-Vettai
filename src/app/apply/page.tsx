@@ -176,6 +176,7 @@ function ApplyStudio() {
     setBusy("draft");
     setSteps((s) => ({ ...s, draft: "active", review: "idle", revise: "idle", ats: "idle" }));
     const p = { text: posting.text, url: posting.url || undefined, company: posting.company || evaluation.company, role: posting.role || evaluation.role, location: posting.location || undefined };
+    let partial = "";
     try {
       let d: Drafts;
       if (isAi(mode)) {
@@ -183,15 +184,21 @@ function ApplyStudio() {
         d = { ...first, review: null, stage: "draft", mode: "ai", updatedAt: new Date().toISOString() };
         setDrafts(d);
         mark("draft", "done");
-        mark("review", "active");
-        const review = await api<Review>("/api/apply/review", { profile, posting: p, evaluation, cv: d.cv, coverLetter: d.coverLetter });
-        d = { ...d, review, stage: "reviewed" };
-        setDrafts(d);
-        mark("review", "done");
-        mark("revise", "active");
-        const revised = await api<{ cv: CvDoc; coverLetter: CoverLetter; changelog: string[] }>("/api/apply/revise", { profile, posting: p, cv: d.cv, coverLetter: d.coverLetter, review });
-        d = { ...d, cv: revised.cv, coverLetter: revised.coverLetter, changelog: [...first.changelog, ...revised.changelog], stage: "final", updatedAt: new Date().toISOString() };
-        mark("revise", "done");
+        try {
+          mark("review", "active");
+          const review = await api<Review>("/api/apply/review", { profile, posting: p, evaluation, cv: d.cv, coverLetter: d.coverLetter });
+          d = { ...d, review, stage: "reviewed" };
+          setDrafts(d);
+          mark("review", "done");
+          mark("revise", "active");
+          const revised = await api<{ cv: CvDoc; coverLetter: CoverLetter; changelog: string[] }>("/api/apply/revise", { profile, posting: p, cv: d.cv, coverLetter: d.coverLetter, review });
+          d = { ...d, cv: revised.cv, coverLetter: revised.coverLetter, changelog: [...first.changelog, ...revised.changelog], stage: "final", updatedAt: new Date().toISOString() };
+          mark("revise", "done");
+        } catch (e) {
+          // Keep (and save) the AI draft already written; only the later passes are missing.
+          setSteps((s) => ({ ...s, review: s.review === "active" ? "error" : s.review, revise: s.revise === "active" ? "error" : s.revise === "idle" ? "skipped" : s.revise }));
+          partial = e instanceof Error ? e.message : String(e);
+        }
       } else {
         await new Promise((r) => setTimeout(r, 600));
         d = heuristicDrafts(profile, evaluation);
@@ -204,7 +211,8 @@ function ApplyStudio() {
       setDrafts(d);
       mark("ats", "done");
       if (appId) updateApplication(appId, { drafts: d });
-      toast.success("Application drafted", isAi(mode) ? "Drafted, reviewed and revised. Read every line before you send it." : "Template drafts ready. Add an API key for tailored drafting.");
+      if (partial) toast.info("Draft saved without the full review", `The first draft is saved; the reviewer pass didn't finish. ${partial}`);
+      else toast.success("Application drafted", isAi(mode) ? "Drafted, reviewed and revised. Read every line before you send it." : "Template drafts ready. Connect a free AI engine in Settings for tailored drafting.");
     } catch (e) {
       setSteps((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v === "active" ? "error" : v])) as Record<StepId, StepState>);
       toast.error("Drafting stopped", e instanceof Error ? e.message : String(e));
@@ -280,7 +288,7 @@ function ApplyStudio() {
                 <Textarea value={posting.text} onChange={(e) => setPosting({ ...posting, text: e.target.value })} placeholder="Paste the full job description…" className="min-h-40 text-xs" />
               )}
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <Badge tone={isAi(mode) ? "good" : "warning"}>{isAi(mode) ? "Claude evaluation" : "Heuristic evaluation (no API key)"}</Badge>
+                <Badge tone={isAi(mode) ? "good" : "warning"}>{isAi(mode) ? "AI evaluation" : "Built-in evaluation"}</Badge>
                 <Button onClick={evaluate} loading={busy === "evaluate"} disabled={!!busy || (!posting.text.trim() && !posting.url.trim())} icon={<Gauge className="h-4 w-4" />}>
                   {evaluation ? "Re-evaluate" : "Evaluate fit"}
                 </Button>
@@ -387,7 +395,7 @@ function EvaluationPanel({ ev, host, onDraft, drafting, hasDrafts }: { ev: Evalu
                     {host.host ? `: ${host.host}` : ""}
                   </Badge>
                 )}
-                {ev.mode === "heuristic" && <Badge tone="neutral">Heuristic</Badge>}
+                {ev.mode === "heuristic" && <Badge tone="neutral">Built-in</Badge>}
               </div>
               <h2 className="mt-2 font-display text-xl font-bold">
                 {ev.role} <span className="text-muted">at</span> {ev.company}
@@ -694,7 +702,7 @@ function ReviewView({ drafts }: { drafts: Drafts }) {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card className="p-5 lg:col-span-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-subtle">Reviewer impression</p>
-        <p className="mt-2 text-sm">{r ? r.impression : "No reviewer pass in heuristic mode. Add an Anthropic API key in Settings to run the drafter-reviewer loop."}</p>
+        <p className="mt-2 text-sm">{r ? r.impression : "No reviewer pass with the built-in engine. Connect a free AI engine in Settings to run the drafter-reviewer loop."}</p>
       </Card>
       {r && (
         <>

@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { handle, readJson, structured } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
 import { postingBlock, profileBrief, system } from "@/lib/server/prompts";
 import { InterviewSchema } from "@/lib/server/schemas";

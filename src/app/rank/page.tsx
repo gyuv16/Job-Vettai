@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { EmptyState, PageHeader, RadialGauge, scoreColor } from "@/components/motion/effects";
 import { toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, cn, Select, Switch } from "@/components/ui/primitives";
-import { api, isAi, useAiMode } from "@/lib/api";
+import { api, ApiError, isAi, useAiMode } from "@/lib/api";
 import { daysSince, daysUntil, DIMENSIONS, today, verdictTone } from "@/lib/framework";
 import { heuristicRank } from "@/lib/heuristics";
 import { useStore } from "@/lib/store";
@@ -82,6 +82,7 @@ export default function RankPage() {
     setRunning(true);
     setProgress({ done: 0, total: batch.length });
     let failed = 0;
+    let builtIn = 0;
     try {
       if (isAi(mode)) {
         for (let i = 0; i < batch.length; i += 5) {
@@ -95,6 +96,14 @@ export default function RankPage() {
               else failed++;
             }
           } catch (e) {
+            if (e instanceof ApiError && (e.code === "AI_UNAVAILABLE" || e.code === "BILLING")) {
+              // This browser just switched to the built-in engine: finish the run with it rather than failing every batch left.
+              for (const j of batch.slice(i)) setRank(j.key, heuristicRank(profile, j));
+              builtIn = batch.length - i;
+              toast.info("AI is busy, finished with the built-in engine", e.message);
+              setProgress({ done: batch.length, total: batch.length });
+              break;
+            }
             failed += chunk.length;
             toast.error("A batch failed", e instanceof Error ? e.message : String(e));
           }
@@ -109,7 +118,7 @@ export default function RankPage() {
       }
       const swept = sweep();
       const deferred = candidates.length - batch.length;
-      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, !isAi(mode) && "Heuristic triage: add an API key for AI scoring."].filter(Boolean).join(" ") || undefined);
+      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, !isAi(mode) && "Built-in triage: connect a free AI engine in Settings for AI scoring."].filter(Boolean).join(" ") || undefined);
     } finally {
       setRunning(false);
     }

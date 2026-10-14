@@ -307,12 +307,20 @@ export interface Settings {
   theme: "dark" | "light" | "system";
   reduceMotion: boolean;
   followupDays: number;
-  /** Use the free built-in engine even when an AI key is available. "billing" = switched on automatically when credit ran out. */
-  freeMode: "off" | "manual" | "billing";
+  /**
+   * Use the free built-in engine instead of AI. "manual" = the visitor's choice;
+   * "billing" = switched on when the Anthropic credit ran out; "limit" = switched on
+   * for an hour (until freeModeUntil) because every AI engine was busy or out of quota.
+   */
+  freeMode: "off" | "manual" | "billing" | "limit";
+  freeModeUntil?: number;
 }
 
 export interface ServerStatus {
+  /** True when the deployment has any AI engine (Mistral, Groq or Claude). */
   serverKey: boolean;
+  /** Which engine keys the deployment has. Missing on deployments from before the free engines. */
+  engines?: { mistral: boolean; groq: boolean; claude: boolean };
   serverWorkspace: "set" | "unset" | "invalid";
   accessCodeRequired: boolean;
   defaultModel: string;

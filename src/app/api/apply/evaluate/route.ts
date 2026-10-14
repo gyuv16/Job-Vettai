@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { clampScore, isIsoDate, overallScore, verdictFor } from "@/lib/framework";
-import { handle, readJson, structured } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { postingInput, profileInput } from "@/lib/server/inputs";
 import { FRAMEWORK, postingBlock, profileBrief, system } from "@/lib/server/prompts";
 import { EvaluationSchema } from "@/lib/server/schemas";

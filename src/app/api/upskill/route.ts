@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { handle, readJson, structured } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
 import { profileBrief, system } from "@/lib/server/prompts";
 import { UpskillSchema } from "@/lib/server/schemas";

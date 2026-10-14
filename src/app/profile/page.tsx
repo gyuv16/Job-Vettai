@@ -153,12 +153,12 @@ function ImportSection({ onDone }: { onDone: () => void }) {
         toast.success("Profile built", "Review each section and fill in goals and preferences.");
       } else {
         if (file && !text) {
-          toast.error("PDF needs AI mode", "Without an API key, paste your CV as text instead.");
+          toast.error("PDF needs AI", "The built-in engine can't read PDFs. Paste your CV as text, or connect a free AI engine in Settings.");
           return;
         }
         const p = heuristicProfileFromText(text);
         replaceProfile({ ...profile, ...p, skills: { ...profile.skills, ...p.skills } } as Profile);
-        toast.info("Basic details extracted", "Heuristic mode pulled contact details and skills. Add an API key for full extraction.");
+        toast.info("Basic details extracted", "The built-in engine pulled contact details and skills. Connect a free AI engine in Settings for full extraction.");
       }
       onDone();
     } catch (e) {
@@ -171,7 +171,7 @@ function ImportSection({ onDone }: { onDone: () => void }) {
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
       <Card className="relative overflow-hidden lg:col-span-3">
-        <CardHeader title="Import your CV" subtitle="PDF or pasted text. Claude extracts a structured profile you can edit." icon={<ScanText className="h-4 w-4" />} />
+        <CardHeader title="Import your CV" subtitle="PDF or pasted text. AI extracts a structured profile you can edit." icon={<ScanText className="h-4 w-4" />} />
         <div className="space-y-4 p-5">
           <motion.div
             onDragOver={(e) => {
@@ -218,7 +218,7 @@ function ImportSection({ onDone }: { onDone: () => void }) {
           </div>
           <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Paste your CV, LinkedIn 'About' and experience sections, or any career notes…" className="min-h-48 font-mono text-xs" />
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <Badge tone={isAi(mode) ? "good" : "warning"}>{isAi(mode) ? "Claude will extract your profile" : "Heuristic mode: basic extraction only"}</Badge>
+            <Badge tone={isAi(mode) ? "good" : "warning"}>{isAi(mode) ? "AI will extract your profile" : "Built-in engine: basic extraction only"}</Badge>
             <Button onClick={run} loading={busy} icon={<Wand2 className="h-4 w-4" />}>
               {busy ? "Reading your CV…" : "Build my profile"}
             </Button>

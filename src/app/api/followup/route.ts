@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { handle, readJson, structured } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
 import { profileBrief, system, WRITING_STYLE } from "@/lib/server/prompts";
 import { FollowupSchema } from "@/lib/server/schemas";
@@ -29,5 +30,6 @@ export const POST = handle(async (req) => {
     system: system(TASK),
     user: `${WRITING_STYLE}\n\nKind: ${kind}\nCompany: ${a.company}\nRole: ${a.role}\nContact: ${a.contact || "(unknown, use the hiring team)"}\nApplied: ${a.appliedAt ?? "unknown"}\nLatest event: ${a.lastEvent}\nSubmitted materials summary: ${a.submittedSummary || "(none recorded)"}\n\n${profileBrief(profile)}`,
     effort: "low",
+    budgetMs: 110_000,
   });
 });

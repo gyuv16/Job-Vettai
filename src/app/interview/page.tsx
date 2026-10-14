@@ -318,7 +318,7 @@ function MockInterview({ company, role, stage, postingText, enabled }: { company
   };
 
   if (!enabled) {
-    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI mode" body="Add an Anthropic API key in Settings (or use a deployment with one) to practise with a Claude interviewer who gives feedback after every answer." action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
+    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body="Connect a free AI engine (Mistral or Groq) in Settings, or use your own Claude key, to practise with an AI interviewer who gives feedback after every answer." action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
   }
 
   return (

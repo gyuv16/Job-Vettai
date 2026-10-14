@@ -6,8 +6,10 @@ export const dynamic = "force-dynamic";
 /** Public, secret-free summary of how this deployment is configured. Never returns key values. */
 export function GET() {
   const ws = envVar("ANTHROPIC_WORKSPACE_ID");
+  const engines = { mistral: !!envVar("MISTRAL_API_KEY"), groq: !!envVar("GROQ_API_KEY"), claude: !!envVar("ANTHROPIC_API_KEY") };
   const status: ServerStatus = {
-    serverKey: !!envVar("ANTHROPIC_API_KEY"),
+    serverKey: engines.mistral || engines.groq || engines.claude,
+    engines,
     serverWorkspace: ws ? (WORKSPACE_ID.test(ws) ? "set" : "invalid") : "unset",
     accessCodeRequired: !!envVar("APP_ACCESS_CODE"),
     defaultModel: DEFAULT_MODEL,

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { fadeUp, PageHeader, stagger } from "@/components/motion/effects";
 import { Modal, toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Select, Switch } from "@/components/ui/primitives";
-import { api, refreshStatus, useAiMode } from "@/lib/api";
+import { api, refreshStatus, serverEngines, useAiMode } from "@/lib/api";
 import { download } from "@/lib/docs";
 import { today } from "@/lib/framework";
 import { buildSample } from "@/lib/sample";
@@ -21,6 +21,10 @@ export default function SettingsPage() {
   const [show, setShow] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const engines = serverEngines(status);
+  const chain = engineChain(engines);
+  // Saved settings from before Free mode existed have no freeMode field.
+  const freeMode = settings.freeMode ?? "off";
 
   const exportData = () => {
     const { profile, jobs, applications, upskill } = useStore.getState();
@@ -50,24 +54,24 @@ export default function SettingsPage() {
           <Card>
             <CardHeader
               title="AI engine"
-              subtitle="Claude powers evaluation, drafting, review, interview prep and upskilling"
+              subtitle="Free AI (Mistral, Groq) or Claude powers evaluation, drafting, review, interview prep and upskilling"
               icon={<Sparkles className="h-4 w-4" />}
-              action={<Badge tone={mode === "heuristic" || mode === "locked" ? "warning" : mode === "loading" ? "neutral" : "good"}>{mode === "user-key" ? "Using your key" : mode === "server-key" ? "Using this site's key" : mode === "free" ? "Free mode" : mode === "locked" ? "Access code needed" : mode === "heuristic" ? "Heuristic mode" : "Checking…"}</Badge>}
+              action={
+                <Badge tone={mode === "heuristic" || mode === "locked" ? "warning" : mode === "loading" ? "neutral" : "good"}>
+                  {mode === "user-key" ? "Using your Claude key" : mode === "server-key" ? (engines.mistral || engines.groq ? "Using free AI" : "Using this site's Claude") : mode === "free" ? (freeMode === "limit" ? "Built-in · AI resting" : "Built-in engine") : mode === "locked" ? "Access code needed" : mode === "heuristic" ? "Built-in engine" : "Checking…"}
+                </Badge>
+              }
             />
             <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
               <div className="space-y-4">
-                <div className={cn("flex items-center justify-between gap-3 rounded-xl border p-3", (settings.freeMode ?? "off") !== "off" ? "border-[color-mix(in_oklab,var(--good)_45%,transparent)]" : "border-line")}>
+                <div className={cn("flex items-center justify-between gap-3 rounded-xl border p-3", freeMode !== "off" ? "border-[color-mix(in_oklab,var(--good)_45%,transparent)]" : "border-line")}>
                   <div>
-                    <p className="text-sm font-medium">Free mode</p>
-                    <p className="text-xs leading-relaxed text-muted">
-                      {settings.freeMode === "billing"
-                        ? "Switched on because the Anthropic credit ran out. Every page uses the free built-in engine. Turn off after adding credit."
-                        : "Always use the free built-in engine (no AI costs), even when a key is set."}
-                    </p>
+                    <p className="text-sm font-medium">Built-in engine only</p>
+                    <p className="text-xs leading-relaxed text-muted">{builtInNote(freeMode, settings.freeModeUntil)}</p>
                   </div>
-                  <Switch checked={(settings.freeMode ?? "off") !== "off"} onChange={(v) => setSettings({ freeMode: v ? "manual" : "off" })} label="Free mode" />
+                  <Switch checked={freeMode !== "off"} onChange={(v) => setSettings({ freeMode: v ? "manual" : "off", freeModeUntil: undefined })} label="Built-in engine only" />
                 </div>
-                <Field label="Your Anthropic API key (optional)" hint="Stored only in this browser. Sent to this site's own API routes, which pass it to Anthropic for your requests and never store it.">
+                <Field label="Your own Anthropic API key (optional, paid)" hint="Only if you want Claude and pay Anthropic for it yourself. Leave empty to use this site's free AI. Stored only in this browser and passed to Anthropic for your requests, never stored on the server.">
                   {(id) => (
                     <div className="relative">
                       <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-subtle" />
@@ -98,31 +102,33 @@ export default function SettingsPage() {
                     {(id) => <Input id={id} type="password" value={settings.accessCode} onChange={(e) => setSettings({ accessCode: e.target.value })} />}
                   </Field>
                 )}
-                <Field label="Model">
-                  {(id) => (
-                    <Select id={id} value={settings.model} onChange={(e) => setSettings({ model: e.target.value })}>
-                      <option value="">Default ({status?.defaultModel ?? "claude-opus-5-5"})</option>
-                      {(status?.models ?? []).map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
+                {(settings.apiKey || engines.claude) && (
+                  <Field label="Claude model">
+                    {(id) => (
+                      <Select id={id} value={settings.model} onChange={(e) => setSettings({ model: e.target.value })}>
+                        <option value="">Default ({status?.defaultModel ?? "claude-opus-5-5"})</option>
+                        {(status?.models ?? []).map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </Select>
+                    )}
+                  </Field>
+                )}
               </div>
               <div className="space-y-3 rounded-2xl border border-line bg-[color-mix(in_oklab,var(--bg-elev)_60%,transparent)] p-4 text-xs leading-relaxed text-muted">
                 <p className="flex items-center gap-2 font-semibold text-fg">
                   <ShieldCheck className="h-4 w-4 text-good" /> How the engine is chosen
                 </p>
                 <p>
-                  <b className="text-fg">1. Your key</b> if you enter one here (you pay for your own usage).
+                  <b className="text-fg">1. Your Claude key</b> if you enter one here (you pay Anthropic for your own usage).
                 </p>
                 <p>
-                  <b className="text-fg">2. This site's key</b> if the deployment sets <code>ANTHROPIC_API_KEY</code> (and <code>ANTHROPIC_WORKSPACE_ID</code> when that key isn't tied to a workspace){status?.accessCodeRequired ? " and you enter its access code" : ""}. {status?.serverKey ? "This deployment has one." : "This deployment does not have one."}
+                  <b className="text-fg">2. This site's AI</b>{status?.accessCodeRequired ? " (after you enter its access code)" : ""}: <b className="text-fg">Mistral</b> (free, <code>MISTRAL_API_KEY</code>), then <b className="text-fg">Groq</b> (free backup, <code>GROQ_API_KEY</code>), then <b className="text-fg">Claude</b> (paid, <code>ANTHROPIC_API_KEY</code>) if set. {chain.length ? `This deployment has: ${chain.join(", ")}.` : "This deployment has none yet."}
                 </p>
                 <p>
-                  <b className="text-fg">3. Heuristic mode</b> otherwise: keyword-overlap scoring and template drafts that work offline, so every page stays usable.
+                  <b className="text-fg">3. Built-in engine</b> otherwise, and for an hour whenever every AI engine is busy: keyword scoring and template drafts that work offline, so every page stays usable.
                 </p>
                 <p>Postings, CVs and company pages are always treated as untrusted data: instructions hidden inside them are ignored.</p>
               </div>
@@ -208,12 +214,33 @@ export default function SettingsPage() {
   );
 }
 
+function engineChain(e: { mistral: boolean; groq: boolean; claude: boolean }): string[] {
+  return [e.mistral && "Mistral", e.groq && "Groq", e.claude && "Claude"].filter((x): x is string => !!x);
+}
+
+function builtInNote(freeMode: AppSettings["freeMode"], until?: number): string {
+  if (freeMode === "billing") return "Switched on because the Anthropic credit ran out. Every page uses the free built-in engine. Turn it off after adding credit or a free Mistral / Groq key.";
+  if (freeMode === "limit") {
+    const at = until ? new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "soon";
+    return `Switched on until ${at} because the AI engines were busy or out of today's free quota. AI comes back by itself, or turn this off to retry now.`;
+  }
+  return "Skip AI and always use the free built-in engine (keyword scoring and template drafts, no keys needed).";
+}
+
+interface EngineCheck {
+  engine: "mistral" | "groq" | "claude";
+  label: string;
+  ok: boolean;
+  model?: string;
+  source?: "visitor" | "server";
+  workspace?: boolean;
+  code?: string;
+  message?: string;
+  ms: number;
+}
+
 interface PingResult {
-  ok: true;
-  source: "visitor" | "server";
-  workspace: boolean;
-  model: string;
-  reply: string;
+  results: EngineCheck[];
 }
 
 function CheckRow({ label, detail, tone, text, i }: { label: string; detail?: string; tone: "good" | "warning" | "critical" | "neutral"; text: string; i: number }) {
@@ -230,13 +257,15 @@ function CheckRow({ label, detail, tone, text, i }: { label: string; detail?: st
   );
 }
 
-/** Shows how this deployment is configured and runs one tiny real Claude request. */
+/** Shows how this deployment is configured and runs one tiny real request against each AI engine. */
 function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStatus | null; settings: AppSettings; onRemoveKey: () => void }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: true; data: PingResult } | { ok: false; message: string } | null>(null);
   const setSettings = useStore((s) => s.setSettings);
   const usingOwnKey = !!settings.apiKey;
   const freeMode = settings.freeMode ?? "off";
+  const engines = serverEngines(status);
+  const chain = engineChain(engines);
   const locked = !usingOwnKey && !!status?.serverKey && status.accessCodeRequired && !settings.accessCode;
 
   // Always show the deployment as it is now, not as it was when this tab first loaded.
@@ -250,10 +279,10 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
     try {
       const [, data] = await Promise.all([refreshStatus(), api<PingResult>("/api/test", {})]);
       setResult({ ok: true, data });
-      if (freeMode === "billing") {
-        // Credit was added since Free mode switched on automatically, so go back to Claude.
-        setSettings({ freeMode: "off" });
-        toast.success("Claude is back on", "Your Anthropic credit works again, so Free mode is off.");
+      if ((freeMode === "billing" || freeMode === "limit") && data.results.some((r) => r.ok)) {
+        // It switched on automatically; an engine answers again, so go back to AI.
+        setSettings({ freeMode: "off", freeModeUntil: undefined });
+        toast.success("AI is back on", "An AI engine answered, so the built-in-only switch is off again.");
       }
     } catch (e) {
       setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
@@ -264,6 +293,8 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
 
   const version = status?.commit ? `${status.commit}${status.branch ? ` · ${status.branch}` : ""}${status.environment ? ` · ${status.environment}` : ""}` : "Local or unknown build";
   const ws = status?.serverWorkspace ?? "unset";
+  const anyOk = result?.ok && result.data.results.some((r) => r.ok);
+  let i = 0;
 
   return (
     <Card>
@@ -279,41 +310,39 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
       />
       <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
         <ul className="divide-y divide-[var(--card-border)]">
-          <CheckRow i={0} label="Site version" detail="Should match the latest commit on main after you merge and Vercel redeploys." tone="neutral" text={version} />
-          <CheckRow i={1} label="Site key (ANTHROPIC_API_KEY)" tone={status?.serverKey ? "good" : "warning"} text={status?.serverKey ? "Set" : "Not set"} />
-          <CheckRow
-            i={2}
-            label="Workspace ID (ANTHROPIC_WORKSPACE_ID)"
-            detail="Only needed when the site key was created at organisation level, not inside a workspace."
-            tone={ws === "set" ? "good" : ws === "invalid" ? "critical" : "neutral"}
-            text={ws === "set" ? "Set" : ws === "invalid" ? "Wrong format" : "Not set"}
-          />
-          {status?.modelSetting === "invalid" && (
-            <CheckRow i={3} label="Model (ANTHROPIC_MODEL)" detail={`Not a supported model, so ${status.defaultModel} is used. Supported: ${status.models.join(", ")}.`} tone="warning" text="Ignored" />
-          )}
-          <CheckRow i={3} label="Access code (APP_ACCESS_CODE)" tone={status?.accessCodeRequired ? (settings.accessCode ? "good" : "warning") : "neutral"} text={status?.accessCodeRequired ? (settings.accessCode ? "Required · entered" : "Required · not entered") : "Not required"} />
-          {freeMode !== "off" && (
+          <CheckRow i={i++} label="Site version" detail="Should match the latest commit on main after you merge and Vercel redeploys." tone="neutral" text={version} />
+          <CheckRow i={i++} label="Mistral (MISTRAL_API_KEY)" detail="Free main AI engine. Key from console.mistral.ai, no card needed." tone={engines.mistral ? "good" : engines.groq ? "neutral" : "warning"} text={engines.mistral ? "Set" : "Not set"} />
+          <CheckRow i={i++} label="Groq (GROQ_API_KEY)" detail="Free backup engine, used when Mistral is busy. Key from console.groq.com." tone={engines.groq ? "good" : "neutral"} text={engines.groq ? "Set" : "Not set"} />
+          <CheckRow i={i++} label="Claude (ANTHROPIC_API_KEY)" detail="Optional and paid. Tried after the free engines." tone="neutral" text={engines.claude ? "Set" : "Not set"} />
+          {engines.claude && (
             <CheckRow
-              i={4}
-              label="Free mode"
-              detail={freeMode === "billing" ? "Switched on automatically because the Anthropic credit ran out. Pages use the free built-in engine." : "Switched on in AI engine below. Pages use the free built-in engine."}
-              tone="good"
-              text={freeMode === "billing" ? "On · credit empty" : "On"}
+              i={i++}
+              label="Workspace ID (ANTHROPIC_WORKSPACE_ID)"
+              detail="Only needed when the Claude key was created at organisation level, not inside a workspace."
+              tone={ws === "set" ? "good" : ws === "invalid" ? "critical" : "neutral"}
+              text={ws === "set" ? "Set" : ws === "invalid" ? "Wrong format" : "Not set"}
             />
           )}
+          {engines.claude && status?.modelSetting === "invalid" && (
+            <CheckRow i={i++} label="Model (ANTHROPIC_MODEL)" detail={`Not a supported model, so ${status.defaultModel} is used. Supported: ${status.models.join(", ")}.`} tone="warning" text="Ignored" />
+          )}
+          <CheckRow i={i++} label="Access code (APP_ACCESS_CODE)" tone={status?.accessCodeRequired ? (settings.accessCode ? "good" : "warning") : "neutral"} text={status?.accessCodeRequired ? (settings.accessCode ? "Required · entered" : "Required · not entered") : "Not required"} />
+          {freeMode !== "off" && (
+            <CheckRow i={i++} label="Built-in engine only" detail={builtInNote(freeMode, settings.freeModeUntil)} tone="good" text={freeMode === "billing" ? "On · credit empty" : freeMode === "limit" ? "On · AI resting" : "On"} />
+          )}
           <CheckRow
-            i={4}
-            label="Key used for AI requests"
-            detail={usingOwnKey ? "A key saved in this browser overrides the site key." : locked ? "Enter the access code in the AI engine section below to use the site key." : undefined}
-            tone={usingOwnKey || locked ? "warning" : status?.serverKey ? "good" : "neutral"}
-            text={usingOwnKey ? "Your browser's key" : locked ? "None · access code needed" : status?.serverKey ? "Site key" : "None · heuristic mode"}
+            i={i++}
+            label="Engine used for AI requests"
+            detail={usingOwnKey ? "A Claude key saved in this browser overrides this site's AI." : locked ? "Enter the access code in the AI engine section below to use this site's AI." : chain.length > 1 ? "Tried in this order; the next one answers when one is busy." : undefined}
+            tone={usingOwnKey || locked ? "warning" : chain.length ? "good" : "neutral"}
+            text={usingOwnKey ? "Your browser's Claude key" : locked ? "None · access code needed" : chain.length ? chain.join(" → ") : "Built-in engine"}
           />
         </ul>
         <div className="flex flex-col gap-3">
           {usingOwnKey && (
             <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,transparent)] p-3 text-xs leading-relaxed">
-              <p className="font-semibold">Your browser key is overriding the site key</p>
-              <p className="mt-1 text-muted">If you set the key in Vercel, remove the one saved here so the site key (and its workspace ID) is used.</p>
+              <p className="font-semibold">Your browser key is overriding this site's AI</p>
+              <p className="mt-1 text-muted">Remove the Claude key saved here to use the site's own engines{chain.length ? ` (${chain.join(", ")})` : ""}.</p>
               <Button
                 size="sm"
                 variant="secondary"
@@ -328,18 +357,30 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
               </Button>
             </div>
           )}
-          {result === null && !busy && <p className="rounded-xl border border-dashed border-line p-4 text-xs text-muted">Press “Test AI connection” to send one tiny request to Claude using exactly the same key and workspace as the rest of the app.</p>}
+          {result === null && !busy && <p className="rounded-xl border border-dashed border-line p-4 text-xs text-muted">Press “Test AI connection” to send one tiny request to each AI engine, using exactly the same keys as the rest of the app.</p>}
           {result && (
-            <motion.div initial={{ opacity: 0, y: 10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 24 }} className={cn("rounded-xl border p-4 text-xs leading-relaxed", result.ok ? "border-[color-mix(in_oklab,var(--good)_40%,transparent)]" : "border-[color-mix(in_oklab,var(--critical)_40%,transparent)]")} role={result.ok ? "status" : "alert"}>
+            <motion.div initial={{ opacity: 0, y: 10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 24 }} className={cn("rounded-xl border p-4 text-xs leading-relaxed", anyOk ? "border-[color-mix(in_oklab,var(--good)_40%,transparent)]" : "border-[color-mix(in_oklab,var(--critical)_40%,transparent)]")} role={anyOk ? "status" : "alert"}>
               <p className="flex items-center gap-2 text-sm font-semibold">
-                {result.ok ? <CircleCheck className="h-4 w-4 text-good" /> : <CircleX className="h-4 w-4 text-critical" />}
-                {result.ok ? "Claude is connected" : "Connection failed"}
+                {anyOk ? <CircleCheck className="h-4 w-4 text-good" /> : <CircleX className="h-4 w-4 text-critical" />}
+                {anyOk ? "AI is connected" : "Connection failed"}
               </p>
               {result.ok ? (
-                <p className="mt-1 text-muted">
-                  Answered using {result.data.source === "visitor" ? "your browser's key" : "the site key"}
-                  {result.data.workspace ? " with a workspace ID" : ""} on {result.data.model}.
-                </p>
+                <ul className="mt-2 space-y-2">
+                  {result.data.results.map((r, n) => (
+                    <motion.li key={r.engine} initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.08 * n }} className="rounded-lg border border-line p-2.5">
+                      <p className="flex items-center justify-between gap-2 font-medium text-fg">
+                        <span className="flex items-center gap-1.5">
+                          {r.ok ? <CircleCheck className="h-3.5 w-3.5 text-good" /> : <CircleX className="h-3.5 w-3.5 text-critical" />}
+                          {r.label}
+                        </span>
+                        <Badge tone={r.ok ? "good" : "critical"}>{r.ok ? `${(r.ms / 1000).toFixed(1)} s` : (r.code ?? "Failed")}</Badge>
+                      </p>
+                      <p className="mt-1 break-words text-muted">
+                        {r.ok ? `Answered on ${r.model}${r.source === "visitor" ? " with your browser's key" : ""}${r.workspace ? " and a workspace ID" : ""}.` : r.message}
+                      </p>
+                    </motion.li>
+                  ))}
+                </ul>
               ) : (
                 <p className="mt-1 text-muted">{result.message}</p>
               )}

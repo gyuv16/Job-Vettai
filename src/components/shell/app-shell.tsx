@@ -5,7 +5,7 @@ import { Cpu, Gift, KeyRound, Lock, Menu, Moon, Sparkles, Sun, X } from "lucide-
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
-import { useAiMode } from "@/lib/api";
+import { serverEngines, useAiMode } from "@/lib/api";
 import { useHydrated, useStore } from "@/lib/store";
 import { cn } from "../ui/primitives";
 import { Toaster } from "../ui/overlay";
@@ -53,13 +53,15 @@ function ThemeToggle() {
 }
 
 function AiChip() {
-  const { mode } = useAiMode();
+  const { mode, status } = useAiMode();
+  const freeMode = useStore((s) => s.settings.freeMode ?? "off");
+  const e = serverEngines(status);
   const cfg = {
     "user-key": { label: "Claude · your key", icon: <KeyRound className="h-3.5 w-3.5" />, dot: "var(--good)" },
-    "server-key": { label: "Claude AI", icon: <Sparkles className="h-3.5 w-3.5" />, dot: "var(--good)" },
+    "server-key": { label: e.mistral || e.groq ? "Free AI" : "Claude AI", icon: <Sparkles className="h-3.5 w-3.5" />, dot: "var(--good)" },
     locked: { label: "Access code needed", icon: <Lock className="h-3.5 w-3.5" />, dot: "var(--warning)" },
-    free: { label: "Free mode", icon: <Gift className="h-3.5 w-3.5" />, dot: "var(--good)" },
-    heuristic: { label: "Heuristic mode", icon: <Cpu className="h-3.5 w-3.5" />, dot: "var(--warning)" },
+    free: { label: freeMode === "limit" ? "Built-in · AI resting" : "Built-in engine", icon: <Gift className="h-3.5 w-3.5" />, dot: "var(--good)" },
+    heuristic: { label: "Built-in engine", icon: <Cpu className="h-3.5 w-3.5" />, dot: "var(--warning)" },
     loading: { label: "Checking AI…", icon: <Cpu className="h-3.5 w-3.5" />, dot: "var(--fg-subtle)" },
   }[mode];
   return (

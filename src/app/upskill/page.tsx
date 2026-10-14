@@ -102,7 +102,7 @@ export default function UpskillPage() {
                 <Badge tone="brand" icon={<Sparkles className="h-3 w-3" />}>
                   {report.sourceCount} postings analysed
                 </Badge>
-                {report.mode === "heuristic" && <Badge tone="warning">Heuristic</Badge>}
+                {report.mode === "heuristic" && <Badge tone="warning">Built-in</Badge>}
                 <span className="text-[11px] text-subtle">{new Date(report.createdAt).toLocaleString()}</span>
               </div>
               <p className="mt-2 text-sm leading-relaxed">{report.summary}</p>

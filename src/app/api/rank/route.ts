@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { clampScore, isIsoDate, overallScore, today, verdictFor } from "@/lib/framework";
-import { handle, readJson, structured } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
 import { FRAMEWORK, profileBrief, system } from "@/lib/server/prompts";
 import { RankSchema } from "@/lib/server/schemas";
@@ -54,6 +55,7 @@ export const POST = handle(async (req) => {
       system: system(TASK),
       user: `${FRAMEWORK}\n\n${profileBrief(profile)}\n\n# Postings to score (return one result per key)\n${postings}`,
       effort: "low",
+      budgetMs: 250_000, // LinkedIn hydration above already used some of maxDuration
     });
     const byKey = new Map(out.results.map((r) => [r.key, r]));
     // Positional fallback if the model mangled a key; a job with no result is reported unscored, never expired.

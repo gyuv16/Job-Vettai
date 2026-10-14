@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { handle, HttpError, readJson, structured } from "@/lib/server/claude";
+import { handle, HttpError, readJson } from "@/lib/server/claude";
+import { structured } from "@/lib/server/llm";
 import { system } from "@/lib/server/prompts";
 import { ProfileSchema } from "@/lib/server/schemas";
 

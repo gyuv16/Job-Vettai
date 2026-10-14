@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { chat, handle, readJson } from "@/lib/server/claude";
+import { handle, readJson } from "@/lib/server/claude";
+import { chat } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
 import { postingBlock, profileBrief, system } from "@/lib/server/prompts";
 
