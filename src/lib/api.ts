@@ -58,7 +58,7 @@ export function fetchStatus(): Promise<ServerStatus> {
     .then((r) => r.json() as Promise<ServerStatus>)
     .catch((): ServerStatus => {
       statusCache = null; // don't pin a transient failure for the rest of the session
-      return { serverKey: false, engines: { mistral: false, groq: false, claude: false }, serverWorkspace: "unset", accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [], commit: null, branch: null, environment: null };
+      return { unreachable: true, serverKey: false, engines: { mistral: false, groq: false, claude: false }, serverWorkspace: "unset", accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [], commit: null, branch: null, environment: null };
     });
   return statusCache;
 }
@@ -79,7 +79,7 @@ export function serverEngines(status: ServerStatus | null): { mistral: boolean; 
 }
 
 /** Why a page is on the built-in engine, in words that say what to do about it ("" when AI is in use). */
-function builtInReason(mode: AiMode, freeMode: Settings["freeMode"], until: number): string {
+function builtInReason(mode: AiMode, freeMode: Settings["freeMode"], until: number, status: ServerStatus | null): string {
   if (mode === "free" && freeMode === "limit") {
     const at = new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     return `AI is resting until ${at} because the AI engines were busy, and comes back by itself (or switch it back on in Settings).`;
@@ -87,6 +87,7 @@ function builtInReason(mode: AiMode, freeMode: Settings["freeMode"], until: numb
   if (mode === "free" && freeMode === "billing") return "The Anthropic credit ran out, so the built-in engine is in use. See Settings.";
   if (mode === "free") return "Built-in engine only is switched on in Settings.";
   if (mode === "locked") return "Enter this site's access code in Settings to use its AI.";
+  if (mode === "heuristic" && status?.unreachable) return "Couldn't check this site's AI set-up just now; reload the page to try again.";
   if (mode === "heuristic") return "This site has no AI engine set up yet: its owner can add a free MISTRAL_API_KEY or GROQ_API_KEY in Vercel, or you can add your own Claude key in Settings.";
   if (mode === "loading") return "Still checking which AI engine this site has; try again in a moment.";
   return "";
@@ -133,7 +134,7 @@ export function useAiMode(): { mode: AiMode; status: ServerStatus | null; why: s
       window.removeEventListener("focus", end);
     };
   }, [freeMode, freeModeUntil, setSettings]);
-  const result = (mode: AiMode) => ({ mode, status, why: builtInReason(mode, freeMode, freeModeUntil) });
+  const result = (mode: AiMode) => ({ mode, status, why: builtInReason(mode, freeMode, freeModeUntil, status) });
   if (freeMode === "manual" || freeMode === "billing") return result("free");
   // A visitor's own key doesn't use the site's busy engines, so it ends the rest.
   if (apiKey) return result("user-key");

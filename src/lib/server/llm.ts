@@ -118,7 +118,11 @@ const HOUR = 60 * 60 * 1000;
  * quotas, outages and anything without a hint.
  */
 function restFor(failures: Array<{ error: HttpError }>): number {
-  const soon = failures.flatMap((f) => (f.error instanceof EngineError && f.error.code === "RATE_LIMIT" && f.error.retryAfterMs !== undefined && f.error.retryAfterMs <= 5 * 60_000 ? [f.error.retryAfterMs] : []));
+  const hint = (e: HttpError) => (e instanceof EngineError ? (e.resetMs ?? (e.code === "RATE_LIMIT" ? e.retryAfterMs : undefined)) : undefined);
+  const soon = failures.flatMap((f) => {
+    const ms = hint(f.error);
+    return ms !== undefined && ms <= 5 * 60_000 ? [ms] : [];
+  });
   return soon.length ? Math.max(2 * 60_000, Math.min(...soon)) : HOUR;
 }
 

@@ -332,4 +332,6 @@ export interface ServerStatus {
   commit: string | null;
   branch: string | null;
   environment: string | null;
+  /** Set by the browser when /api/status couldn't be read, so "no AI" isn't claimed as fact. */
+  unreachable?: boolean;
 }

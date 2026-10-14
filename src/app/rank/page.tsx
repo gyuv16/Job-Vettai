@@ -87,7 +87,10 @@ export default function RankPage() {
     // The built-in engine never overwrites an AI score; it only fills jobs without one.
     const builtInRank = (j: Job) => {
       if (j.rank?.mode === "ai") keptAi++;
-      else setRank(j.key, heuristicRank(profile, j));
+      else {
+        setRank(j.key, heuristicRank(profile, j));
+        if (isAi(mode)) builtIn++;
+      }
     };
     try {
       if (isAi(mode)) {
@@ -105,7 +108,6 @@ export default function RankPage() {
             if (e instanceof ApiError && (e.code === "AI_UNAVAILABLE" || e.code === "BILLING")) {
               // This browser just switched to the built-in engine: finish the run with it rather than failing every batch left.
               batch.slice(i).forEach(builtInRank);
-              builtIn = batch.length - i;
               toast.info("AI is busy, finished with the built-in engine", e.message);
               setProgress({ done: batch.length, total: batch.length });
               break;
@@ -124,7 +126,8 @@ export default function RankPage() {
       }
       const swept = sweep();
       const deferred = candidates.length - batch.length;
-      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, keptAi > 0 && `Kept ${keptAi} existing AI score${keptAi === 1 ? "" : "s"}.`, !isAi(mode) && `Built-in triage. ${why}`].filter(Boolean).join(" ") || undefined);
+      const ranked = batch.length - failed - keptAi;
+      toast.success(`Ranked ${ranked} job${ranked === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, keptAi > 0 && `Kept ${keptAi} existing AI score${keptAi === 1 ? "" : "s"}.`, !isAi(mode) && `Built-in triage. ${why}`].filter(Boolean).join(" ") || undefined);
     } finally {
       setRunning(false);
     }

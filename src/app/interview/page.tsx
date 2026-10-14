@@ -313,11 +313,9 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
       const r = await api<{ reply: string }>("/api/interview/mock", { profile, company, role, stage, postingText: postingText.slice(0, 20000), messages: next });
       setMessages([...next, { role: "assistant", content: r.reply }]);
     } catch (e) {
-      // Give the answer back, so a failed turn never swallows what the candidate typed.
-      if (text === undefined) {
-        setMessages(messages);
-        setInput(content);
-      }
+      // Undo the turn, and give a typed answer back so a failure never swallows it.
+      setMessages(messages);
+      if (text === undefined) setInput(content);
       toast.error("Interviewer unavailable", e instanceof Error ? e.message : String(e));
     } finally {
       setTyping(false);
@@ -331,7 +329,20 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
 
   return (
     <Card className="flex h-[min(70vh,640px)] flex-col overflow-hidden">
-      <CardHeader title={`Mock ${stage.toLowerCase()}`} subtitle={`${role} at ${company} · feedback after each answer`} icon={<Bot className="h-4 w-4" />} action={messages.length > 0 ? <Button size="sm" variant="ghost" onClick={() => setMessages([])}>Restart</Button> : undefined} />
+      <CardHeader title={`Mock ${stage.toLowerCase()}`} subtitle={`${role} at ${company} · feedback after each answer`} icon={<Bot className="h-4 w-4" />} action={
+          messages.length > 0 ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setMessages([]);
+                setInput("");
+              }}
+            >
+              Restart
+            </Button>
+          ) : undefined
+        } />
       <div className="flex-1 space-y-3 overflow-y-auto p-5">
         {messages.length === 0 && !typing && (
           <div className="grid h-full place-items-center text-center">
@@ -391,7 +402,7 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
           rows={1}
           disabled={!messages.length || typing || !enabled}
         />
-        <Button type="submit" size="icon" className="h-11 w-11" disabled={!input.trim() || typing || !enabled} aria-label="Send">
+        <Button type="submit" size="icon" className="h-11 w-11" disabled={!input.trim() || typing || !enabled || !messages.length} aria-label="Send">
           <Send className="h-4 w-4" />
         </Button>
       </form>

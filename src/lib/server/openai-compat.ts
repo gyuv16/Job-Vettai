@@ -85,6 +85,8 @@ export class EngineError extends HttpError {
   ) {
     super(status, message, code);
   }
+  /** When the engine gave up: how soon one of its rate-limited models said it would be free again. */
+  resetMs?: number;
 }
 
 const TRIM_MARK = "\n\n[… middle trimmed to fit the free AI engine's size limit …]\n\n";
@@ -234,21 +236,28 @@ async function call<R>(p: Provider, o: CallOptions, accept: (answer: { text: str
   const queue = o.persistent ? [...p.models] : p.models.slice(0, 1);
   const limited: Array<{ model: string; at: number }> = [];
   let retries = 0;
+  // Whichever model failed last, remember the soonest reset any of them reported (it sets the browser's rest).
+  const giveUp = (e: EngineError, pending = limited): EngineError => {
+    const soonest = Math.min(...pending.map((l) => l.at));
+    if (Number.isFinite(soonest)) e.resetMs = Math.max(0, soonest - Date.now());
+    return e;
+  };
   for (;;) {
     let model = queue.shift();
     if (!model) {
       limited.sort((a, b) => a.at - b.at);
-      const next = limited.shift();
+      const next = limited[0];
       const wait = next ? Math.max(1000, next.at - Date.now()) : Infinity;
       if (!next || !o.persistent || retries >= MAX_RATE_RETRIES || wait > MAX_RATE_WAIT_MS || o.deadline - Date.now() < wait + 15_000) {
-        throw last ?? new EngineError(500, `${p.label}: no model configured.`, "INTERNAL");
+        throw giveUp(last ?? new EngineError(500, `${p.label}: no model configured.`, "INTERNAL"));
       }
+      limited.shift();
       retries++;
       await sleep(wait);
       model = next.model;
     }
     const remaining = o.deadline - Date.now();
-    if (remaining < MIN_ATTEMPT_MS) throw last ?? new EngineError(504, `${p.label} had no time left to answer.`, "CONNECTION", "out of time");
+    if (remaining < MIN_ATTEMPT_MS) throw giveUp(last ?? new EngineError(504, `${p.label} had no time left to answer.`, "CONNECTION", "out of time"));
     try {
       // Checking the answer inside the loop lets an unusable answer fall back to the next model too.
       return accept(await once(p, model, o, Math.min(remaining, ATTEMPT_CAP_MS)));
@@ -256,7 +265,7 @@ async function call<R>(p: Provider, o: CallOptions, accept: (answer: { text: str
       last = error instanceof EngineError ? error : new EngineError(500, `${p.label}: unexpected error.`, "INTERNAL", error instanceof Error ? error.message.slice(0, 200) : "");
       // Same key and host for every model: a rejected key won't work on the next one either, and with
       // a backup engine waiting, a hung or unreachable host would only eat the time the backup needs.
-      if (last.code === "BAD_KEY" || (last.code === "CONNECTION" && o.hasBackup) || !o.persistent) throw last;
+      if (last.code === "BAD_KEY" || (last.code === "CONNECTION" && o.hasBackup) || !o.persistent) throw giveUp(last);
       if (last.code === "RATE_LIMIT") limited.push({ model, at: Date.now() + (last.retryAfterMs ?? 1500) });
       // Anything else (model missing, refused for this plan, bad output): try the next model.
     }
