@@ -1,5 +1,5 @@
-// Heuristic ("no API key") engine. It keeps every page usable without an
-// Anthropic key by scoring with keyword overlap and drafting from templates.
+// The built-in engine. It keeps every page usable without any AI engine by
+// scoring with keyword overlap and drafting from templates.
 // It is honest about being a heuristic: every result carries mode: "heuristic".
 
 import {
@@ -158,7 +158,7 @@ export function heuristicEvaluate(p: Profile, text: string, meta: { company: str
     department: "",
     deadline: deadlineFrom(text),
     postingLanguage: "English",
-    eligibility: { verdict: "UNVERIFIED", note: "Heuristic mode cannot read eligibility clauses reliably. Check the posting." },
+    eligibility: { verdict: "UNVERIFIED", note: "The built-in engine cannot read eligibility clauses reliably. Check the posting." },
     languageGate: languageGate(text, p),
     locationGate: locationGate(text, meta.location, p),
     technical: { score: scores.technical, note: `${matched.length} of ${matched.length + missing.length} detected skills match.` },
@@ -169,7 +169,7 @@ export function heuristicEvaluate(p: Profile, text: string, meta: { company: str
     verdict: verdictFor(overall),
     strengths: matched.slice(0, 5).map((s) => `${s} is a skill you already have.`),
     gaps: missing.slice(0, 5).map((s) => `${s} is asked for but not on your profile.`),
-    recommendation: "Heuristic estimate only. Add an Anthropic API key in Settings for a full evaluation.",
+    recommendation: "Built-in estimate from keyword overlap only. Re-evaluate while AI is available for a full evaluation.",
     keywords: [...matched, ...missing].slice(0, 20),
     requirements,
     callQuestions: [],
@@ -223,7 +223,7 @@ export function heuristicDrafts(p: Profile, ev: Evaluation): Drafts {
     cv,
     coverLetter: letter,
     review: null,
-    changelog: ["Template draft generated without AI. Add an API key for tailored drafting, a reviewer pass and revision."],
+    changelog: ["Template draft generated without AI. Redraft while AI is available for tailored drafting, a reviewer pass and revision."],
     stage: "draft",
     mode: "heuristic",
     updatedAt: new Date().toISOString(),

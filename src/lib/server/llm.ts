@@ -50,19 +50,28 @@ function claudeCtx(e: Extract<Engine, { kind: "claude" }>): ClaudeCtx {
   return ctx;
 }
 
-/** Plain text for engines that can't read PDFs: PDF blocks become their extracted text (done once per request). */
-function flattener(user: UserContent): () => Promise<string> {
+/**
+ * Plain text for engines that can't read PDFs: PDF blocks become their extracted
+ * text (done once per request). With `pdfOptional` (the visitor also pasted the
+ * text), an unreadable PDF is skipped instead of failing the request.
+ */
+function flattener(user: UserContent, pdfOptional: boolean): () => Promise<string> {
   let cached: Promise<string> | undefined;
-  return () => (cached ??= flatten(user));
+  return () => (cached ??= flatten(user, pdfOptional));
 }
 
-async function flatten(user: UserContent): Promise<string> {
+async function flatten(user: UserContent, pdfOptional: boolean): Promise<string> {
   if (typeof user === "string") return user;
   const parts: string[] = [];
   for (const b of user) {
     if (b.type === "text") parts.push(b.text);
     else if (b.type === "document" && b.source.type === "base64" && b.source.media_type === "application/pdf") {
-      parts.push(`Attached PDF (text extracted):\n<untrusted_cv_pdf>\n${(await pdfToText(b.source.data)).slice(0, 60000)}\n</untrusted_cv_pdf>`);
+      try {
+        parts.push(`Attached PDF (text extracted):\n<untrusted_cv_pdf>\n${(await pdfToText(b.source.data)).slice(0, 60000)}\n</untrusted_cv_pdf>`);
+      } catch (error) {
+        if (!pdfOptional || !(error instanceof HttpError) || !INPUT.has(error.code)) throw error;
+        parts.push("(The attached PDF has no readable text, so use the pasted CV text below.)");
+      }
     }
   }
   return parts.join("\n\n");
@@ -72,6 +81,8 @@ async function flatten(user: UserContent): Promise<string> {
 const INPUT = new Set(["PDF_NO_TEXT", "PDF_BAD"]);
 // Set-up problems the site owner must fix; switching browsers to the built-in engine would hide them.
 const CONFIG = new Set(["NO_KEY", "BAD_KEY", "PERMISSION", "MODEL", "NOT_FOUND", "WORKSPACE_ID", "BAD_WORKSPACE_ID"]);
+// Busy, out of quota or down: worth resting on the built-in engine for a while.
+const TRANSIENT = new Set(["RATE_LIMIT", "QUOTA", "CONNECTION", "API", "BILLING"]);
 
 const SHORT: Record<string, string> = {
   RATE_LIMIT: "busy or out of free quota",
@@ -107,19 +118,29 @@ function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpEr
   if (failures.every((f) => CONFIG.has(f.error.code))) {
     return new HttpError(502, `No AI engine could be used. ${summary}. Fix the key in Vercel → Settings → Environment Variables and redeploy. Settings → Test AI connection checks each engine.`, "AI_CONFIG");
   }
-  return new HttpError(503, `The AI engines can't answer right now (${summary}). Job Vettai switched this browser to the free built-in engine for the next hour, so just try again. AI comes back by itself.`, "AI_UNAVAILABLE");
+  if (failures.every((f) => TRANSIENT.has(f.error.code) || CONFIG.has(f.error.code))) {
+    return new HttpError(503, `The AI engines can't answer right now (${summary}). Job Vettai switched this browser to the free built-in engine for the next hour: your next try uses it, and AI comes back by itself.`, "AI_UNAVAILABLE");
+  }
+  // Something about this particular request (declined, unusable or cut-off answer): other requests may still work.
+  return new HttpError(502, `The AI engines couldn't complete this request (${summary}). Try again; if it keeps failing, shorten the input.`, "AI_FAILED");
 }
+
+// Time kept back for each engine still to come, so one slow engine can't starve the backup.
+const RESERVE_PER_ENGINE_MS = 40_000;
 
 async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, deadline: number) => Promise<R>): Promise<R> {
   const deadline = Date.now() + budgetMs;
   const failures: Array<{ engine: Engine; error: HttpError }> = [];
-  for (const e of list) {
-    if (deadline - Date.now() < 5000) {
+  for (const [i, e] of list.entries()) {
+    const remaining = deadline - Date.now();
+    if (remaining < 5000) {
       failures.push({ engine: e, error: new EngineError(504, `${e.label} was skipped: no time left.`, "CONNECTION", "skipped, no time left") });
       continue;
     }
+    const later = list.length - i - 1;
+    const reserve = later ? Math.min(later * RESERVE_PER_ENGINE_MS, remaining / 2) : 0;
     try {
-      return await run(e, deadline);
+      return await run(e, deadline - reserve);
     } catch (error) {
       failures.push({ engine: e, error: toHttpError(error) });
     }
@@ -136,6 +157,7 @@ export async function structured<T extends z.ZodType>({
   effort = "medium",
   maxTokens,
   budgetMs = 270_000,
+  pdfOptional = false,
 }: {
   req: Request;
   schema: T;
@@ -145,9 +167,11 @@ export async function structured<T extends z.ZodType>({
   maxTokens?: number;
   /** Total time for every engine together; keep it under the route's maxDuration. */
   budgetMs?: number;
+  /** The user also pasted text, so a PDF without readable text can be skipped by engines that need text. */
+  pdfOptional?: boolean;
 }): Promise<z.infer<T>> {
   const list = engines(req);
-  const text = flattener(user);
+  const text = flattener(user, pdfOptional);
   return runChain(list, budgetMs, async (e, deadline) => {
     if (e.kind === "free") return compatStructured(e.provider, { schema, system, user: await text(), deadline });
     return claudeStructured(claudeCtx(e), { schema, system, user, effort, maxTokens, timeoutMs: list.length > 1 ? deadline - Date.now() : undefined });

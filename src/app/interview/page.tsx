@@ -34,7 +34,7 @@ export default function InterviewPage() {
 
 function Interview() {
   const params = useSearchParams();
-  const { mode } = useAiMode();
+  const { mode, why } = useAiMode();
   const profile = useStore((s) => s.profile);
   const applications = useStore((s) => s.applications);
   const updateApplication = useStore((s) => s.updateApplication);
@@ -259,7 +259,7 @@ function Interview() {
           </motion.div>
         ) : (
           <motion.div key="mock" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -16 }}>
-            {app && <MockInterview key={app.id + stage} company={app.company} role={app.role} stage={stage} postingText={app.postingText} enabled={isAi(mode)} />}
+            {app && <MockInterview key={app.id + stage} company={app.company} role={app.role} stage={stage} postingText={app.postingText} enabled={isAi(mode)} why={why} />}
           </motion.div>
         )}
       </AnimatePresence>
@@ -293,7 +293,7 @@ function Checklist({ items }: { items: string[] }) {
   );
 }
 
-function MockInterview({ company, role, stage, postingText, enabled }: { company: string; role: string; stage: string; postingText: string; enabled: boolean }) {
+function MockInterview({ company, role, stage, postingText, enabled, why }: { company: string; role: string; stage: string; postingText: string; enabled: boolean; why: string }) {
   const profile = useStore((s) => s.profile);
   const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
   const [input, setInput] = useState("");
@@ -318,7 +318,7 @@ function MockInterview({ company, role, stage, postingText, enabled }: { company
   };
 
   if (!enabled) {
-    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body="Connect a free AI engine (Mistral or Groq) in Settings, or use your own Claude key, to practise with an AI interviewer who gives feedback after every answer." action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
+    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body={`${why} Then practise with an AI interviewer who gives feedback after every answer.`} action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
   }
 
   return (

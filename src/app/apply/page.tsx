@@ -67,7 +67,7 @@ export default function ApplyPage() {
 
 function ApplyStudio() {
   const params = useSearchParams();
-  const { mode } = useAiMode();
+  const { mode, why } = useAiMode();
   const profile = useStore((s) => s.profile);
   const jobs = useStore((s) => s.jobs);
   const applications = useStore((s) => s.applications);
@@ -131,8 +131,16 @@ function ApplyStudio() {
   };
 
   // ---------------------------------------------------------------- evaluate
+  // AI work for this application, on screen or saved: built-in output shouldn't replace it without asking.
+  const hasAiWork = (what: "evaluation" | "drafts"): boolean => {
+    const saved = appId ? applications.find((a) => a.id === appId) : undefined;
+    return what === "evaluation" ? evaluation?.mode === "ai" || saved?.evaluation?.mode === "ai" || hasAiWork("drafts") : drafts?.mode === "ai" || saved?.drafts?.mode === "ai";
+  };
+
   const evaluate = async () => {
+    if (!isAi(mode) && hasAiWork("evaluation") && !window.confirm(`Replace the AI evaluation with a built-in estimate? ${why}`)) return;
     let p = { ...posting };
+    const before = { evaluation, drafts };
     setBusy("evaluate");
     setEvaluation(null);
     setDrafts(null);
@@ -162,6 +170,9 @@ function ApplyStudio() {
       else setAppId(createApplication({ ...payload, status: "draft", channel: jobKey ? jobs[jobKey]?.source ?? "" : p.url ? hc.host : "Direct" }));
     } catch (e) {
       setSteps((s) => ({ ...s, parse: s.parse === "active" ? "error" : s.parse, evaluate: s.evaluate === "active" ? "error" : s.evaluate }));
+      // A failed re-run keeps the previous results on screen.
+      setEvaluation(before.evaluation);
+      setDrafts(before.drafts);
       toast.error("Evaluation failed", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
@@ -173,6 +184,7 @@ function ApplyStudio() {
     if (!evaluation) return;
     const fails = [evaluation.eligibility.verdict === "FAIL" && "eligibility", evaluation.languageGate.verdict === "FAIL" && "language", evaluation.locationGate.verdict === "FAIL" && "location"].filter(Boolean);
     if (fails.length && !window.confirm(`This role failed the ${fails.join(" and ")} gate. The framework says not to draft. Draft anyway?`)) return;
+    if (!isAi(mode) && hasAiWork("drafts") && !window.confirm(`Replace the AI draft with a template from the built-in engine? ${why}`)) return;
     setBusy("draft");
     setSteps((s) => ({ ...s, draft: "active", review: "idle", revise: "idle", ats: "idle" }));
     const p = { text: posting.text, url: posting.url || undefined, company: posting.company || evaluation.company, role: posting.role || evaluation.role, location: posting.location || undefined };
@@ -197,7 +209,7 @@ function ApplyStudio() {
         } catch (e) {
           // Keep (and save) the AI draft already written; only the later passes are missing.
           setSteps((s) => ({ ...s, review: s.review === "active" ? "error" : s.review, revise: s.revise === "active" ? "error" : s.revise === "idle" ? "skipped" : s.revise }));
-          partial = e instanceof Error ? e.message : String(e);
+          partial = `${d.review ? "The review is saved too; only the revision didn't finish." : "The reviewer pass didn't finish."} ${e instanceof Error ? e.message : String(e)}`;
         }
       } else {
         await new Promise((r) => setTimeout(r, 600));
@@ -211,8 +223,8 @@ function ApplyStudio() {
       setDrafts(d);
       mark("ats", "done");
       if (appId) updateApplication(appId, { drafts: d });
-      if (partial) toast.info("Draft saved without the full review", `The first draft is saved; the reviewer pass didn't finish. ${partial}`);
-      else toast.success("Application drafted", isAi(mode) ? "Drafted, reviewed and revised. Read every line before you send it." : "Template drafts ready. Connect a free AI engine in Settings for tailored drafting.");
+      if (partial) toast.info("AI draft saved", partial);
+      else toast.success("Application drafted", isAi(mode) ? "Drafted, reviewed and revised. Read every line before you send it." : `Template drafts ready. ${why}`);
     } catch (e) {
       setSteps((s) => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, v === "active" ? "error" : v])) as Record<StepId, StepState>);
       toast.error("Drafting stopped", e instanceof Error ? e.message : String(e));
@@ -702,7 +714,7 @@ function ReviewView({ drafts }: { drafts: Drafts }) {
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card className="p-5 lg:col-span-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-subtle">Reviewer impression</p>
-        <p className="mt-2 text-sm">{r ? r.impression : "No reviewer pass with the built-in engine. Connect a free AI engine in Settings to run the drafter-reviewer loop."}</p>
+        <p className="mt-2 text-sm">{r ? r.impression : "No reviewer pass yet. Redraft while AI is available to run the drafter-reviewer loop."}</p>
       </Card>
       {r && (
         <>

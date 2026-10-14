@@ -89,13 +89,36 @@ export function trimMiddle(text: string, max: number): string {
   return text.slice(0, head) + TRIM_MARK + text.slice(text.length - (room - head));
 }
 
+// Postings and CVs are wrapped in <untrusted_…> tags by the prompt builders.
+const DATA_BLOCK = /<(untrusted_[a-z_]+)>([\s\S]*?)<\/\1>/g;
+
+/**
+ * Fit a prompt into `max` characters by shrinking the untrusted data blocks
+ * (postings, CVs) in proportion to their size, so tags, job keys, headers and
+ * instructions survive. Cutting the middle of the whole prompt is the last resort.
+ */
+export function fitText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const blocks = [...text.matchAll(DATA_BLOCK)];
+  const inner = blocks.reduce((n, m) => n + m[2].length, 0);
+  if (inner > 0) {
+    const excess = text.length - max + blocks.length * TRIM_MARK.length;
+    const keep = Math.max(0, (inner - excess) / inner);
+    text = text.replace(DATA_BLOCK, (_, tag: string, body: string) => `<${tag}>${trimMiddle(body, Math.max(300, Math.floor(body.length * keep)))}</${tag}>`);
+  }
+  return trimMiddle(text, max);
+}
+
 /** The provider's error text, which never contains our key. */
 function reasonFrom(body: unknown): string {
   if (!body || typeof body !== "object") return "";
   const b = body as { error?: unknown; message?: unknown; detail?: unknown };
   const err = b.error as { message?: unknown } | string | undefined;
   const msg = typeof err === "string" ? err : typeof err?.message === "string" ? err.message : typeof b.message === "string" ? b.message : b.detail !== undefined ? JSON.stringify(b.detail) : "";
-  return String(msg).slice(0, 300);
+  // Groq names the owner's organisation in rate-limit errors; that has no business reaching visitors.
+  return String(msg)
+    .replace(/\b(org|proj|project)_[A-Za-z0-9]+/g, "$1_…")
+    .slice(0, 300);
 }
 
 function retryAfter(res: Response): number | undefined {
@@ -190,8 +213,9 @@ async function call(p: Provider, o: CallOptions): Promise<{ text: string; model:
         return await once(p, model, o, Math.min(remaining, ATTEMPT_CAP_MS));
       } catch (error) {
         last = error instanceof EngineError ? error : new EngineError(500, `${p.label}: unexpected error.`, "INTERNAL", error instanceof Error ? error.message.slice(0, 200) : "");
-        // Same key for every model: a rejected key won't work on the next one either.
-        if (last.code === "BAD_KEY" || last.code === "PERMISSION" || !o.persistent) throw last;
+        // Same key and host for every model: a rejected key won't work on the next one either, and a
+        // hung or unreachable host would only eat the time the next engine needs.
+        if (last.code === "BAD_KEY" || last.code === "PERMISSION" || last.code === "CONNECTION" || !o.persistent) throw last;
         // Free tiers allow about one request a second; a short wait usually clears it.
         const wait = last.code === "RATE_LIMIT" ? (last.retryAfterMs ?? 1500) : -1;
         if (attempt === 0 && wait >= 0 && wait <= 8000 && o.deadline - Date.now() > wait + 15_000) {
@@ -209,9 +233,9 @@ function fitMessages(p: Provider, system: string, rest: Message[]): Message[] {
   const total = system.length + rest.reduce((n, m) => n + m.content.length, 0);
   if (total <= p.maxInputChars) return [{ role: "system", content: system }, ...rest];
   // Keep the system prompt (task + honesty rules) whole when it is small, and trim the user data instead.
-  const sys = trimMiddle(system, Math.max(2000, Math.floor(p.maxInputChars * 0.6)));
+  const sys = fitText(system, Math.max(2000, Math.floor(p.maxInputChars * 0.6)));
   let room = p.maxInputChars - sys.length;
-  if (rest.length === 1) return [{ role: "system", content: sys }, { ...rest[0], content: trimMiddle(rest[0].content, Math.max(2000, room)) }];
+  if (rest.length === 1) return [{ role: "system", content: sys }, { ...rest[0], content: fitText(rest[0].content, Math.max(2000, room)) }];
   // Chat: keep the most recent turns that fit.
   const kept: Message[] = [];
   for (let i = rest.length - 1; i >= 0; i--) {

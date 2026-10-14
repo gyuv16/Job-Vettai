@@ -31,7 +31,7 @@ function flags(j: Job) {
 }
 
 export default function RankPage() {
-  const { mode } = useAiMode();
+  const { mode, why } = useAiMode();
   const jobsMap = useStore((s) => s.jobs);
   const profile = useStore((s) => s.profile);
   const setRank = useStore((s) => s.setRank);
@@ -118,7 +118,7 @@ export default function RankPage() {
       }
       const swept = sweep();
       const deferred = candidates.length - batch.length;
-      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, !isAi(mode) && "Built-in triage: connect a free AI engine in Settings for AI scoring."].filter(Boolean).join(" ") || undefined);
+      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, !isAi(mode) && `Built-in triage. ${why}`].filter(Boolean).join(" ") || undefined);
     } finally {
       setRunning(false);
     }

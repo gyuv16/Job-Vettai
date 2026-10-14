@@ -133,7 +133,8 @@ export async function claudeStructured<T extends z.ZodType>(ctx: ClaudeCtx, { sc
         output_config: { effort, format: { type: "json_schema", schema: apiSchema(schema) } },
         ...(useFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       },
-      timeoutMs ? { timeout: timeoutMs } : undefined,
+      // In a chain the deadline is shared: SDK retries would each get a fresh full timeout and overrun maxDuration.
+      timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : undefined,
     );
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "Claude declined this request. Try rephrasing the input.", "REFUSAL");
@@ -175,7 +176,8 @@ export async function claudeChat(
         output_config: { effort },
         ...(useFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       },
-      timeoutMs ? { timeout: timeoutMs } : undefined,
+      // In a chain the deadline is shared: SDK retries would each get a fresh full timeout and overrun maxDuration.
+      timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : undefined,
     );
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "Claude declined this message. Try rephrasing.", "REFUSAL");
@@ -244,12 +246,12 @@ function apiReason(error: InstanceType<typeof Anthropic.APIError>): string {
 // Anthropic reports an empty balance as 400 invalid_request_error ("Your credit balance is too low…"), not 402.
 const BILLING_REASON = /credit balance|purchase credits|plans & billing|billing/i;
 
-function billingError(reason: string): HttpError {
-  return new HttpError(
-    402,
-    `Your Anthropic credit balance is empty, so Claude can't answer. Job Vettai has switched this browser to the free built-in engine, so just try again. For free AI with no card, add MISTRAL_API_KEY or GROQ_API_KEY in Vercel (see the README). To use Claude later, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings. Anthropic said: ${reason}`,
-    "BILLING",
-  );
+function billingError(reason: string, ctx?: KeyContext): HttpError {
+  const next =
+    ctx?.source === "visitor"
+      ? "To use this site's free AI instead, remove your key in Settings. To keep using Claude, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings."
+      : "For free AI with no card, add MISTRAL_API_KEY or GROQ_API_KEY in Vercel (see the README). To use Claude later, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings.";
+  return new HttpError(402, `The Anthropic credit balance is empty, so Claude can't answer. Job Vettai has switched this browser to the free built-in engine, which your next try will use. ${next} Anthropic said: ${reason}`, "BILLING");
 }
 
 function workspaceSetIn(ctx?: KeyContext): string {
@@ -280,14 +282,14 @@ export function toHttpError(error: unknown, ctx?: KeyContext): HttpError {
   }
   if (error instanceof Anthropic.RateLimitError) return new HttpError(429, "Rate limited by the Anthropic API. Wait a moment and retry.", "RATE_LIMIT");
   if (error instanceof Anthropic.BadRequestError) {
-    if (BILLING_REASON.test(apiReason(error))) return billingError(apiReason(error));
+    if (BILLING_REASON.test(apiReason(error))) return billingError(apiReason(error), ctx);
     if (/anthropic-workspace-id|scoped to a workspace/i.test(error.message)) {
       return new HttpError(400, workspaceHelp(ctx, error.message), "WORKSPACE_ID");
     }
     return new HttpError(400, `Anthropic API rejected the request: ${error.message}`, "BAD_REQUEST");
   }
   if (error instanceof Anthropic.APIConnectionError) return new HttpError(502, "Could not reach the Anthropic API.", "CONNECTION");
-  if (error instanceof Anthropic.APIError && error.status === 402) return billingError(apiReason(error));
+  if (error instanceof Anthropic.APIError && error.status === 402) return billingError(apiReason(error), ctx);
   if (error instanceof Anthropic.APIError) return new HttpError(502, `Anthropic API error (${error.status ?? "unknown"}): ${apiReason(error)}`, "API");
   return new HttpError(500, error instanceof Error ? error.message : "Unexpected error", "INTERNAL");
 }

@@ -25,5 +25,5 @@ export const POST = handle(async (req) => {
     type: "text",
     text: `<untrusted_cv>\n${(b.text ?? "(see attached PDF)").slice(0, 60000)}\n</untrusted_cv>${b.notes ? `\n\nCandidate's own notes:\n${b.notes}` : ""}\n\nReturn the structured profile.`,
   });
-  return structured({ req, schema: ProfileSchema, system: system(TASK), user: content, effort: "low" });
+  return structured({ req, schema: ProfileSchema, system: system(TASK), user: content, effort: "low", pdfOptional: !!b.text?.trim() });
 });

@@ -15,12 +15,13 @@ import {
   Trash2,
   UserRound,
   Wand2,
+  X,
 } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { fadeUp, PageHeader, popIn, RadialGauge, stagger } from "@/components/motion/effects";
 import { toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, ChipInput, cn, Field, Input, Select, Switch, Tabs, Textarea } from "@/components/ui/primitives";
-import { api, isAi, useAiMode } from "@/lib/api";
+import { api, ApiError, isAi, useAiMode } from "@/lib/api";
 import { uid } from "@/lib/framework";
 import { heuristicProfileFromText, newStory } from "@/lib/heuristics";
 import { profileCompleteness, useStore } from "@/lib/store";
@@ -116,7 +117,7 @@ type SectionProps = { profile: Profile; set: (p: Partial<Profile>) => void };
 // ------------------------------------------------------------------ Import
 
 function ImportSection({ onDone }: { onDone: () => void }) {
-  const { mode } = useAiMode();
+  const { mode, why } = useAiMode();
   const replaceProfile = useStore((s) => s.replaceProfile);
   const profile = useStore((s) => s.profile);
   const [text, setText] = useState("");
@@ -124,6 +125,11 @@ function ImportSection({ onDone }: { onDone: () => void }) {
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const clearFile = () => {
+    setFile(null);
+    if (inputRef.current) inputRef.current.value = "";
+  };
 
   const accept = (f: File | undefined) => {
     if (!f) return;
@@ -153,15 +159,17 @@ function ImportSection({ onDone }: { onDone: () => void }) {
         toast.success("Profile built", "Review each section and fill in goals and preferences.");
       } else {
         if (file && !text) {
-          toast.error("PDF needs AI", "The built-in engine can't read PDFs. Paste your CV as text, or connect a free AI engine in Settings.");
+          toast.error("PDF needs AI", `The built-in engine can't read PDFs. Paste your CV as text. ${why}`);
           return;
         }
         const p = heuristicProfileFromText(text);
         replaceProfile({ ...profile, ...p, skills: { ...profile.skills, ...p.skills } } as Profile);
-        toast.info("Basic details extracted", "The built-in engine pulled contact details and skills. Connect a free AI engine in Settings for full extraction.");
+        toast.info("Basic details extracted", `The built-in engine pulled contact details and skills only. ${why}`);
       }
       onDone();
     } catch (e) {
+      // An unreadable PDF would be sent again with the next try, so drop it and let pasted text through.
+      if (e instanceof ApiError && (e.code === "PDF_NO_TEXT" || e.code === "PDF_BAD")) clearFile();
       toast.error("Import failed", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -209,6 +217,18 @@ function ImportSection({ onDone }: { onDone: () => void }) {
               </div>
               <p className="text-sm font-semibold">{file ? file.name : "Drop your CV PDF here, or click to browse"}</p>
               <p className="mt-1 text-xs text-muted">{file ? `${Math.round(file.size / 1024)} KB · ready` : "PDF up to 3 MB, or a .txt/.md file"}</p>
+              {file && !busy && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearFile();
+                  }}
+                  className="mx-auto mt-2 inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-brand-soft hover:text-fg"
+                >
+                  <X className="h-3.5 w-3.5" /> Remove PDF
+                </button>
+              )}
             </div>
           </motion.div>
           <div className="flex items-center gap-3 text-[11px] uppercase tracking-wider text-subtle">
