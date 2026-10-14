@@ -311,7 +311,13 @@ export interface Settings {
 
 export interface ServerStatus {
   serverKey: boolean;
+  serverWorkspace: "set" | "unset" | "invalid";
   accessCodeRequired: boolean;
   defaultModel: string;
   models: string[];
+  /** Present on deployments that understand ANTHROPIC_WORKSPACE_ID. */
+  workspaceSupport?: boolean;
+  commit: string | null;
+  branch: string | null;
+  environment: string | null;
 }

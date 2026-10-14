@@ -64,6 +64,19 @@ Changed or added an environment variable later (for example `ANTHROPIC_WORKSPACE
 
 The AI routes set `maxDuration` up to 300 seconds; drafting with review and revision makes three sequential calls, so keep Vercel's Fluid Compute enabled (the default).
 
+## Troubleshooting
+
+Open **Settings → Connection check** on your live site and press **Test AI connection**. It shows the deployed version, which variables are set (never their values), which key is being used, and the exact error if Claude can't be reached.
+
+**"This API key is not scoped to a workspace…"**
+
+1. **Is the fix deployed?** If the error starts with `Anthropic API rejected the request: 400 {…}`, the site is running an older build without workspace support. Make sure the latest code is merged into `main` and Vercel has finished deploying it (Connection check → *Site version* shows the commit).
+2. **Which key is used?** A key saved in the site's Settings page (in your browser) overrides the Vercel key. Either add its Workspace ID in Settings, or click **Remove my browser key**.
+3. **Site key:** in Vercel → Settings → Environment Variables, add `ANTHROPIC_WORKSPACE_ID` with the workspace ID (`wrkspc_01…`, from Anthropic Console → Settings → Workspaces). Tick **Production** and **Preview**.
+4. **Redeploy.** Vercel applies variable changes only to new deployments: Deployments → latest → **Redeploy**.
+
+Or skip the workspace ID entirely by creating a new API key *inside* a workspace in the Anthropic Console and using that as `ANTHROPIC_API_KEY`.
+
 ## Run locally
 
 ```bash

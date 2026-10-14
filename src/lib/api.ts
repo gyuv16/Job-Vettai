@@ -39,7 +39,7 @@ let statusCache: Promise<ServerStatus> | null = null;
 export function fetchStatus(): Promise<ServerStatus> {
   statusCache ??= fetch("/api/status")
     .then((r) => r.json() as Promise<ServerStatus>)
-    .catch(() => ({ serverKey: false, accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [] }));
+    .catch((): ServerStatus => ({ serverKey: false, serverWorkspace: "unset", accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [], commit: null, branch: null, environment: null }));
   return statusCache;
 }
 

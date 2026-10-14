@@ -1,16 +1,17 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Database, Download, Eye, EyeOff, KeyRound, Laptop, Moon, Palette, Settings, ShieldCheck, Sparkles, Sun, Trash2, Upload } from "lucide-react";
+import { Activity, CircleCheck, CircleX, Database, Download, Eye, EyeOff, KeyRound, Laptop, Moon, Palette, Settings, ShieldCheck, Sparkles, Sun, Trash2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { fadeUp, PageHeader, stagger } from "@/components/motion/effects";
 import { Modal, toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Select, Switch } from "@/components/ui/primitives";
-import { useAiMode } from "@/lib/api";
+import { api, useAiMode } from "@/lib/api";
 import { download } from "@/lib/docs";
 import { today } from "@/lib/framework";
 import { buildSample } from "@/lib/sample";
 import { useStore } from "@/lib/store";
+import type { ServerStatus, Settings as AppSettings } from "@/lib/types";
 
 export default function SettingsPage() {
   const { mode, status } = useAiMode();
@@ -42,6 +43,9 @@ export default function SettingsPage() {
     <div>
       <PageHeader eyebrow="Settings" icon={<Settings className="h-3 w-3" />} title="Settings and data" subtitle="Choose the AI engine, tune the look and feel, and back up everything you have built." />
       <motion.div variants={stagger(0.08)} initial="hidden" animate="show" className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <motion.div variants={fadeUp} className="lg:col-span-2">
+          <ConnectionCheck status={status} settings={settings} onRemoveKey={() => setSettings({ apiKey: "", workspaceId: "" })} />
+        </motion.div>
         <motion.div variants={fadeUp} className="lg:col-span-2">
           <Card>
             <CardHeader
@@ -190,6 +194,114 @@ export default function SettingsPage() {
       </motion.div>
       <ResetModal open={resetOpen} onClose={() => setResetOpen(false)} />
     </div>
+  );
+}
+
+interface PingResult {
+  ok: true;
+  source: "visitor" | "server";
+  workspace: boolean;
+  model: string;
+  reply: string;
+}
+
+function CheckRow({ label, detail, tone, text, i }: { label: string; detail?: string; tone: "good" | "warning" | "critical" | "neutral"; text: string; i: number }) {
+  return (
+    <motion.li initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 * i }} className="flex items-start justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        {detail && <p className="text-[11px] leading-relaxed text-muted">{detail}</p>}
+      </div>
+      <Badge tone={tone} className="shrink-0">
+        {text}
+      </Badge>
+    </motion.li>
+  );
+}
+
+/** Shows how this deployment is configured and runs one tiny real Claude request. */
+function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStatus | null; settings: AppSettings; onRemoveKey: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: true; data: PingResult } | { ok: false; message: string } | null>(null);
+  const usingOwnKey = !!settings.apiKey;
+
+  const test = async () => {
+    setBusy(true);
+    setResult(null);
+    try {
+      setResult({ ok: true, data: await api<PingResult>("/api/test", {}) });
+    } catch (e) {
+      setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const version = status?.commit ? `${status.commit}${status.branch ? ` · ${status.branch}` : ""}${status.environment ? ` · ${status.environment}` : ""}` : "Local or unknown build";
+  const ws = status?.serverWorkspace ?? "unset";
+
+  return (
+    <Card>
+      <CardHeader
+        title="Connection check"
+        subtitle="What this deployment has configured, and a live test request"
+        icon={<Activity className="h-4 w-4" />}
+        action={
+          <Button size="sm" onClick={test} loading={busy} icon={<Activity className="h-3.5 w-3.5" />}>
+            Test AI connection
+          </Button>
+        }
+      />
+      <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
+        <ul className="divide-y divide-[var(--card-border)]">
+          <CheckRow i={0} label="Site version" detail="Should match the latest commit on main after you merge and Vercel redeploys." tone="neutral" text={version} />
+          <CheckRow i={1} label="Site key (ANTHROPIC_API_KEY)" tone={status?.serverKey ? "good" : "warning"} text={status?.serverKey ? "Set" : "Not set"} />
+          <CheckRow
+            i={2}
+            label="Workspace ID (ANTHROPIC_WORKSPACE_ID)"
+            detail="Only needed when the site key was created at organisation level, not inside a workspace."
+            tone={ws === "set" ? "good" : ws === "invalid" ? "critical" : "neutral"}
+            text={ws === "set" ? "Set" : ws === "invalid" ? "Wrong format" : "Not set"}
+          />
+          <CheckRow i={3} label="Access code (APP_ACCESS_CODE)" tone={status?.accessCodeRequired ? (settings.accessCode ? "good" : "warning") : "neutral"} text={status?.accessCodeRequired ? (settings.accessCode ? "Required · entered" : "Required · not entered") : "Not required"} />
+          <CheckRow
+            i={4}
+            label="Key used for AI requests"
+            detail={usingOwnKey ? "A key saved in this browser overrides the site key." : undefined}
+            tone={usingOwnKey ? "warning" : status?.serverKey ? "good" : "neutral"}
+            text={usingOwnKey ? "Your browser's key" : status?.serverKey ? "Site key" : "None · heuristic mode"}
+          />
+        </ul>
+        <div className="flex flex-col gap-3">
+          {usingOwnKey && (
+            <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,transparent)] p-3 text-xs leading-relaxed">
+              <p className="font-semibold">Your browser key is overriding the site key</p>
+              <p className="mt-1 text-muted">If you set the key in Vercel, remove the one saved here so the site key (and its workspace ID) is used.</p>
+              <Button size="sm" variant="secondary" className="mt-2" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={onRemoveKey}>
+                Remove my browser key
+              </Button>
+            </div>
+          )}
+          {result === null && !busy && <p className="rounded-xl border border-dashed border-line p-4 text-xs text-muted">Press “Test AI connection” to send one tiny request to Claude using exactly the same key and workspace as the rest of the app.</p>}
+          {result && (
+            <motion.div initial={{ opacity: 0, y: 10, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 24 }} className={cn("rounded-xl border p-4 text-xs leading-relaxed", result.ok ? "border-[color-mix(in_oklab,var(--good)_40%,transparent)]" : "border-[color-mix(in_oklab,var(--critical)_40%,transparent)]")} role={result.ok ? "status" : "alert"}>
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                {result.ok ? <CircleCheck className="h-4 w-4 text-good" /> : <CircleX className="h-4 w-4 text-critical" />}
+                {result.ok ? "Claude is connected" : "Connection failed"}
+              </p>
+              {result.ok ? (
+                <p className="mt-1 text-muted">
+                  Answered using {result.data.source === "visitor" ? "your browser's key" : "the site key"}
+                  {result.data.workspace ? " with a workspace ID" : ""} on {result.data.model}.
+                </p>
+              ) : (
+                <p className="mt-1 text-muted">{result.message}</p>
+              )}
+            </motion.div>
+          )}
+        </div>
+      </div>
+    </Card>
   );
 }
 
