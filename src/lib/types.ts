@@ -314,6 +314,8 @@ export interface ServerStatus {
   serverWorkspace: "set" | "unset" | "invalid";
   accessCodeRequired: boolean;
   defaultModel: string;
+  /** State of ANTHROPIC_MODEL: unset, a supported model, or unsupported (the default is used instead). */
+  modelSetting?: "default" | "set" | "invalid";
   models: string[];
   /** Present on deployments that understand ANTHROPIC_WORKSPACE_ID. */
   workspaceSupport?: boolean;

@@ -2,11 +2,11 @@
 
 import { motion } from "framer-motion";
 import { Activity, CircleCheck, CircleX, Database, Download, Eye, EyeOff, KeyRound, Laptop, Moon, Palette, Settings, ShieldCheck, Sparkles, Sun, Trash2, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fadeUp, PageHeader, stagger } from "@/components/motion/effects";
 import { Modal, toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Select, Switch } from "@/components/ui/primitives";
-import { api, useAiMode } from "@/lib/api";
+import { api, refreshStatus, useAiMode } from "@/lib/api";
 import { download } from "@/lib/docs";
 import { today } from "@/lib/framework";
 import { buildSample } from "@/lib/sample";
@@ -52,7 +52,7 @@ export default function SettingsPage() {
               title="AI engine"
               subtitle="Claude powers evaluation, drafting, review, interview prep and upskilling"
               icon={<Sparkles className="h-4 w-4" />}
-              action={<Badge tone={mode === "heuristic" ? "warning" : mode === "loading" ? "neutral" : "good"}>{mode === "user-key" ? "Using your key" : mode === "server-key" ? "Using this site's key" : mode === "heuristic" ? "Heuristic mode" : "Checking…"}</Badge>}
+              action={<Badge tone={mode === "heuristic" || mode === "locked" ? "warning" : mode === "loading" ? "neutral" : "good"}>{mode === "user-key" ? "Using your key" : mode === "server-key" ? "Using this site's key" : mode === "locked" ? "Access code needed" : mode === "heuristic" ? "Heuristic mode" : "Checking…"}</Badge>}
             />
             <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
               <div className="space-y-4">
@@ -224,12 +224,19 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: true; data: PingResult } | { ok: false; message: string } | null>(null);
   const usingOwnKey = !!settings.apiKey;
+  const locked = !usingOwnKey && !!status?.serverKey && status.accessCodeRequired && !settings.accessCode;
+
+  // Always show the deployment as it is now, not as it was when this tab first loaded.
+  useEffect(() => {
+    refreshStatus();
+  }, []);
 
   const test = async () => {
     setBusy(true);
     setResult(null);
     try {
-      setResult({ ok: true, data: await api<PingResult>("/api/test", {}) });
+      const [, data] = await Promise.all([refreshStatus(), api<PingResult>("/api/test", {})]);
+      setResult({ ok: true, data });
     } catch (e) {
       setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -263,13 +270,16 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
             tone={ws === "set" ? "good" : ws === "invalid" ? "critical" : "neutral"}
             text={ws === "set" ? "Set" : ws === "invalid" ? "Wrong format" : "Not set"}
           />
+          {status?.modelSetting === "invalid" && (
+            <CheckRow i={3} label="Model (ANTHROPIC_MODEL)" detail={`Not a supported model, so ${status.defaultModel} is used. Supported: ${status.models.join(", ")}.`} tone="warning" text="Ignored" />
+          )}
           <CheckRow i={3} label="Access code (APP_ACCESS_CODE)" tone={status?.accessCodeRequired ? (settings.accessCode ? "good" : "warning") : "neutral"} text={status?.accessCodeRequired ? (settings.accessCode ? "Required · entered" : "Required · not entered") : "Not required"} />
           <CheckRow
             i={4}
             label="Key used for AI requests"
-            detail={usingOwnKey ? "A key saved in this browser overrides the site key." : undefined}
-            tone={usingOwnKey ? "warning" : status?.serverKey ? "good" : "neutral"}
-            text={usingOwnKey ? "Your browser's key" : status?.serverKey ? "Site key" : "None · heuristic mode"}
+            detail={usingOwnKey ? "A key saved in this browser overrides the site key." : locked ? "Enter the access code in the AI engine section below to use the site key." : undefined}
+            tone={usingOwnKey || locked ? "warning" : status?.serverKey ? "good" : "neutral"}
+            text={usingOwnKey ? "Your browser's key" : locked ? "None · access code needed" : status?.serverKey ? "Site key" : "None · heuristic mode"}
           />
         </ul>
         <div className="flex flex-col gap-3">
@@ -277,7 +287,16 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
             <div className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,transparent)] p-3 text-xs leading-relaxed">
               <p className="font-semibold">Your browser key is overriding the site key</p>
               <p className="mt-1 text-muted">If you set the key in Vercel, remove the one saved here so the site key (and its workspace ID) is used.</p>
-              <Button size="sm" variant="secondary" className="mt-2" icon={<Trash2 className="h-3.5 w-3.5" />} onClick={onRemoveKey}>
+              <Button
+                size="sm"
+                variant="secondary"
+                className="mt-2"
+                icon={<Trash2 className="h-3.5 w-3.5" />}
+                onClick={() => {
+                  onRemoveKey();
+                  setResult(null); // the old result was for the removed key
+                }}
+              >
                 Remove my browser key
               </Button>
             </div>
