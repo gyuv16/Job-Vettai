@@ -30,7 +30,13 @@ export async function api<T>(path: string, body: unknown): Promise<T> {
     throw new ApiError("Network error. Check your connection and retry.", "NETWORK", 0);
   }
   const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
-  if (!res.ok) throw new ApiError(data.error ?? `Request failed (${res.status})`, data.code ?? "ERROR", res.status);
+  if (!res.ok) {
+    // Out of Anthropic credit: keep the site working by switching this browser to the free engine.
+    if (data.code === "BILLING" && useStore.getState().settings.freeMode !== "manual") {
+      useStore.getState().setSettings({ freeMode: "billing" });
+    }
+    throw new ApiError(data.error ?? `Request failed (${res.status})`, data.code ?? "ERROR", res.status);
+  }
   return data as T;
 }
 
@@ -55,7 +61,7 @@ export async function refreshStatus(): Promise<ServerStatus> {
   return s;
 }
 
-export type AiMode = "user-key" | "server-key" | "locked" | "heuristic" | "loading";
+export type AiMode = "user-key" | "server-key" | "locked" | "free" | "heuristic" | "loading";
 
 /**
  * Which engine will answer: the visitor's key, the deployment's key, or the
@@ -65,6 +71,8 @@ export type AiMode = "user-key" | "server-key" | "locked" | "heuristic" | "loadi
 export function useAiMode(): { mode: AiMode; status: ServerStatus | null } {
   const apiKey = useStore((s) => s.settings.apiKey);
   const accessCode = useStore((s) => s.settings.accessCode);
+  // Saved settings from before Free mode existed have no freeMode field.
+  const freeMode = useStore((s) => s.settings.freeMode ?? "off");
   const [status, setStatus] = useState<ServerStatus | null>(null);
   useEffect(() => {
     let live = true;
@@ -76,6 +84,7 @@ export function useAiMode(): { mode: AiMode; status: ServerStatus | null } {
       statusListeners.delete(update);
     };
   }, []);
+  if (freeMode !== "off") return { mode: "free", status };
   if (apiKey) return { mode: "user-key", status };
   if (!status) return { mode: "loading", status };
   if (status.serverKey && status.accessCodeRequired && !accessCode) return { mode: "locked", status };

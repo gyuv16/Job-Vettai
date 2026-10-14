@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, MotionConfig } from "framer-motion";
-import { Cpu, KeyRound, Lock, Menu, Moon, Sparkles, Sun, X } from "lucide-react";
+import { Cpu, Gift, KeyRound, Lock, Menu, Moon, Sparkles, Sun, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
@@ -58,6 +58,7 @@ function AiChip() {
     "user-key": { label: "Claude · your key", icon: <KeyRound className="h-3.5 w-3.5" />, dot: "var(--good)" },
     "server-key": { label: "Claude AI", icon: <Sparkles className="h-3.5 w-3.5" />, dot: "var(--good)" },
     locked: { label: "Access code needed", icon: <Lock className="h-3.5 w-3.5" />, dot: "var(--warning)" },
+    free: { label: "Free mode", icon: <Gift className="h-3.5 w-3.5" />, dot: "var(--good)" },
     heuristic: { label: "Heuristic mode", icon: <Cpu className="h-3.5 w-3.5" />, dot: "var(--warning)" },
     loading: { label: "Checking AI…", icon: <Cpu className="h-3.5 w-3.5" />, dot: "var(--fg-subtle)" },
   }[mode];

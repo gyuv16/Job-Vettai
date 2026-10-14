@@ -52,10 +52,21 @@ export default function SettingsPage() {
               title="AI engine"
               subtitle="Claude powers evaluation, drafting, review, interview prep and upskilling"
               icon={<Sparkles className="h-4 w-4" />}
-              action={<Badge tone={mode === "heuristic" || mode === "locked" ? "warning" : mode === "loading" ? "neutral" : "good"}>{mode === "user-key" ? "Using your key" : mode === "server-key" ? "Using this site's key" : mode === "locked" ? "Access code needed" : mode === "heuristic" ? "Heuristic mode" : "Checking…"}</Badge>}
+              action={<Badge tone={mode === "heuristic" || mode === "locked" ? "warning" : mode === "loading" ? "neutral" : "good"}>{mode === "user-key" ? "Using your key" : mode === "server-key" ? "Using this site's key" : mode === "free" ? "Free mode" : mode === "locked" ? "Access code needed" : mode === "heuristic" ? "Heuristic mode" : "Checking…"}</Badge>}
             />
             <div className="grid grid-cols-1 gap-5 p-5 md:grid-cols-2">
               <div className="space-y-4">
+                <div className={cn("flex items-center justify-between gap-3 rounded-xl border p-3", (settings.freeMode ?? "off") !== "off" ? "border-[color-mix(in_oklab,var(--good)_45%,transparent)]" : "border-line")}>
+                  <div>
+                    <p className="text-sm font-medium">Free mode</p>
+                    <p className="text-xs leading-relaxed text-muted">
+                      {settings.freeMode === "billing"
+                        ? "Switched on because the Anthropic credit ran out. Every page uses the free built-in engine. Turn off after adding credit."
+                        : "Always use the free built-in engine (no AI costs), even when a key is set."}
+                    </p>
+                  </div>
+                  <Switch checked={(settings.freeMode ?? "off") !== "off"} onChange={(v) => setSettings({ freeMode: v ? "manual" : "off" })} label="Free mode" />
+                </div>
                 <Field label="Your Anthropic API key (optional)" hint="Stored only in this browser. Sent to this site's own API routes, which pass it to Anthropic for your requests and never store it.">
                   {(id) => (
                     <div className="relative">
@@ -223,7 +234,9 @@ function CheckRow({ label, detail, tone, text, i }: { label: string; detail?: st
 function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStatus | null; settings: AppSettings; onRemoveKey: () => void }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: true; data: PingResult } | { ok: false; message: string } | null>(null);
+  const setSettings = useStore((s) => s.setSettings);
   const usingOwnKey = !!settings.apiKey;
+  const freeMode = settings.freeMode ?? "off";
   const locked = !usingOwnKey && !!status?.serverKey && status.accessCodeRequired && !settings.accessCode;
 
   // Always show the deployment as it is now, not as it was when this tab first loaded.
@@ -237,6 +250,11 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
     try {
       const [, data] = await Promise.all([refreshStatus(), api<PingResult>("/api/test", {})]);
       setResult({ ok: true, data });
+      if (freeMode === "billing") {
+        // Credit was added since Free mode switched on automatically, so go back to Claude.
+        setSettings({ freeMode: "off" });
+        toast.success("Claude is back on", "Your Anthropic credit works again, so Free mode is off.");
+      }
     } catch (e) {
       setResult({ ok: false, message: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -274,6 +292,15 @@ function ConnectionCheck({ status, settings, onRemoveKey }: { status: ServerStat
             <CheckRow i={3} label="Model (ANTHROPIC_MODEL)" detail={`Not a supported model, so ${status.defaultModel} is used. Supported: ${status.models.join(", ")}.`} tone="warning" text="Ignored" />
           )}
           <CheckRow i={3} label="Access code (APP_ACCESS_CODE)" tone={status?.accessCodeRequired ? (settings.accessCode ? "good" : "warning") : "neutral"} text={status?.accessCodeRequired ? (settings.accessCode ? "Required · entered" : "Required · not entered") : "Not required"} />
+          {freeMode !== "off" && (
+            <CheckRow
+              i={4}
+              label="Free mode"
+              detail={freeMode === "billing" ? "Switched on automatically because the Anthropic credit ran out. Pages use the free built-in engine." : "Switched on in AI engine below. Pages use the free built-in engine."}
+              tone="good"
+              text={freeMode === "billing" ? "On · credit empty" : "On"}
+            />
+          )}
           <CheckRow
             i={4}
             label="Key used for AI requests"

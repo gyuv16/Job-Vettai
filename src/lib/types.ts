@@ -307,6 +307,8 @@ export interface Settings {
   theme: "dark" | "light" | "system";
   reduceMotion: boolean;
   followupDays: number;
+  /** Use the free built-in engine even when an AI key is available. "billing" = switched on automatically when credit ran out. */
+  freeMode: "off" | "manual" | "billing";
 }
 
 export interface ServerStatus {

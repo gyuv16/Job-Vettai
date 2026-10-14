@@ -17,6 +17,8 @@ Nothing is required to be paid:
 
 The site never asks for payment details. The AI key is optional and can be added or removed any time in Settings.
 
+**Free mode.** Anthropic's API has no free tier. If the Anthropic credit runs out, the site switches that browser to **Free mode** automatically, so every page keeps working with the free built-in engine instead of failing. You can also turn Free mode on yourself in Settings to avoid any AI cost. After adding credit, press **Test AI connection** in Settings; when it succeeds, Free mode switches off again. To make the whole site free for every visitor, delete `ANTHROPIC_API_KEY` in Vercel and redeploy.
+
 ## Pages
 
 | Page | What it does | Animation style |

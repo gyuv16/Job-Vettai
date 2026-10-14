@@ -54,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = {
   theme: "dark",
   reduceMotion: false,
   followupDays: 10,
+  freeMode: "off",
 };
 
 interface State {
