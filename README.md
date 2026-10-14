@@ -39,7 +39,7 @@ The API routes call Claude through the official Anthropic SDK with structured ou
 
 The engine is chosen per request:
 
-1. **The visitor's own API key**, if they enter one in Settings (stored only in their browser).
+1. **The visitor's own API key**, if they enter one in Settings (stored only in their browser), plus a Workspace ID if that key isn't tied to a workspace.
 2. **The deployment's key** (`ANTHROPIC_API_KEY`), optionally protected by an access code.
 3. **Heuristic mode** if neither is available: keyword-overlap scoring and template drafts, so the site is never broken.
 
@@ -54,12 +54,28 @@ Job postings, CVs and web pages are always treated as untrusted data: the prompt
    | Name | Required | Value |
    |---|---|---|
    | `ANTHROPIC_API_KEY` | Recommended | Your key from [console.anthropic.com](https://console.anthropic.com). Without it, visitors use their own key or heuristic mode. |
+   | `ANTHROPIC_WORKSPACE_ID` | Only if Anthropic asks for it | If you see "This API key is not scoped to a workspace", your key was created at organisation level. Set this to the workspace ID (`wrkspc_01…`, from Console → Settings → Workspaces), or create a new key inside a workspace instead. |
    | `APP_ACCESS_CODE` | Strongly recommended with a key | Any passphrase. Visitors must enter it in Settings before your key is used, so strangers cannot spend your credits. |
    | `ANTHROPIC_MODEL` | Optional | Defaults to `claude-opus-5-5`. Visitors can also pick a model in Settings. |
 
 4. Click **Deploy**. Your site is live at `https://<project>.vercel.app`.
 
+Changed or added an environment variable later (for example `ANTHROPIC_WORKSPACE_ID`)? Vercel only applies it to new deployments: open **Deployments**, choose the latest one, and click **Redeploy**.
+
 The AI routes set `maxDuration` up to 300 seconds; drafting with review and revision makes three sequential calls, so keep Vercel's Fluid Compute enabled (the default).
+
+## Troubleshooting
+
+Open **Settings → Connection check** on your live site and press **Test AI connection**. It shows the deployed version, which variables are set (never their values), which key is being used, and the exact error if Claude can't be reached.
+
+**"This API key is not scoped to a workspace…"**
+
+1. **Is the fix deployed?** If the error starts with `Anthropic API rejected the request: 400 {…}`, the site is running an older build without workspace support. Make sure the latest code is merged into `main` and Vercel has finished deploying it (Connection check → *Site version* shows the commit).
+2. **Which key is used?** A key saved in the site's Settings page (in your browser) overrides the Vercel key. Either add its Workspace ID in Settings, or click **Remove my browser key**.
+3. **Site key:** in Vercel → Settings → Environment Variables, add `ANTHROPIC_WORKSPACE_ID` with the workspace ID (`wrkspc_01…`, from Anthropic Console → Settings → Workspaces). Tick **Production** and **Preview**.
+4. **Redeploy.** Vercel applies variable changes only to new deployments: Deployments → latest → **Redeploy**.
+
+Or skip the workspace ID entirely by creating a new API key *inside* a workspace in the Anthropic Console and using that as `ANTHROPIC_API_KEY`.
 
 ## Run locally
 
