@@ -4,7 +4,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 
 export const ALLOWED_MODELS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-fable-5-1"] as const;
-export const DEFAULT_MODEL = (process.env.ANTHROPIC_MODEL as string | undefined) || "claude-opus-5-5";
+const ENV_MODEL = envVar("ANTHROPIC_MODEL");
+/** "invalid" when ANTHROPIC_MODEL names a model this app doesn't support; the default is used instead. */
+export const ENV_MODEL_STATE: "default" | "set" | "invalid" = !ENV_MODEL ? "default" : (ALLOWED_MODELS as readonly string[]).includes(ENV_MODEL) ? "set" : "invalid";
+export const DEFAULT_MODEL = ENV_MODEL_STATE === "set" ? (ENV_MODEL as string) : "claude-opus-5-5";
 
 // Models that accept the server-side `fallbacks: "default"` refusal fallback.
 const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1", "claude-opus-5"]);
@@ -222,14 +225,39 @@ function workspaceHelp(ctx: KeyContext | undefined, raw: string): string {
   return "This API key isn't tied to a workspace, so Anthropic needs a Workspace ID with each request. Add one, or use a key created inside a workspace.";
 }
 
+/** Anthropic's own error text (from the response body), which never contains secrets. */
+function apiReason(error: InstanceType<typeof Anthropic.APIError>): string {
+  const body = error.error as { error?: { message?: unknown } } | undefined;
+  const msg = typeof body?.error?.message === "string" ? body.error.message : error.message;
+  return msg.slice(0, 400);
+}
+
+function workspaceSetIn(ctx?: KeyContext): string {
+  return ctx?.source === "server" ? "ANTHROPIC_WORKSPACE_ID in Vercel" : "the Workspace ID in Settings";
+}
+
 export function toHttpError(error: unknown, ctx?: KeyContext): HttpError {
   if (error instanceof HttpError) return error;
+  if (error instanceof Anthropic.APIError && error.status !== undefined) {
+    // Visible in the Vercel function logs; the reason and request id hold no secrets.
+    console.warn("[anthropic]", error.status, error.type ?? "", error.requestID ?? "", apiReason(error));
+  }
   if (error instanceof Anthropic.AuthenticationError) {
     const where = ctx?.source === "server" ? "Check it in Vercel's environment variables, then redeploy." : "Check it in Settings.";
     return new HttpError(401, `${keyName(ctx)} was rejected by Anthropic. ${where}`, "BAD_KEY");
   }
-  if (error instanceof Anthropic.PermissionDeniedError) return new HttpError(403, "This API key cannot use the selected model.", "PERMISSION");
-  if (error instanceof Anthropic.NotFoundError) return new HttpError(404, "The selected Claude model is not available to this key.", "MODEL");
+  if (error instanceof Anthropic.PermissionDeniedError) {
+    const hint = ctx?.workspace
+      ? ` Check that ${workspaceSetIn(ctx)} belongs to the same organisation as the key and that the key is allowed to use that workspace.`
+      : " Check the organisation's access and workspace settings in the Anthropic Console.";
+    return new HttpError(403, `${keyName(ctx)} isn't allowed to do this.${hint} Anthropic said: ${apiReason(error)}`, "PERMISSION");
+  }
+  if (error instanceof Anthropic.NotFoundError) {
+    const reason = apiReason(error);
+    if (/model/i.test(reason)) return new HttpError(404, `The selected Claude model isn't available to this key. Pick another model in Settings. Anthropic said: ${reason}`, "MODEL");
+    const hint = ctx?.workspace ? ` If this mentions the workspace, check ${workspaceSetIn(ctx)}.` : "";
+    return new HttpError(404, `Anthropic couldn't find something this request needs.${hint} Anthropic said: ${reason}`, "NOT_FOUND");
+  }
   if (error instanceof Anthropic.RateLimitError) return new HttpError(429, "Rate limited by the Anthropic API. Wait a moment and retry.", "RATE_LIMIT");
   if (error instanceof Anthropic.BadRequestError) {
     if (/anthropic-workspace-id|scoped to a workspace/i.test(error.message)) {
@@ -238,7 +266,10 @@ export function toHttpError(error: unknown, ctx?: KeyContext): HttpError {
     return new HttpError(400, `Anthropic API rejected the request: ${error.message}`, "BAD_REQUEST");
   }
   if (error instanceof Anthropic.APIConnectionError) return new HttpError(502, "Could not reach the Anthropic API.", "CONNECTION");
-  if (error instanceof Anthropic.APIError) return new HttpError(502, `Anthropic API error (${error.status ?? "unknown"}).`, "API");
+  if (error instanceof Anthropic.APIError && error.status === 402) {
+    return new HttpError(402, `Anthropic declined this for a billing reason. Check credits and payment in the Anthropic Console → Billing. Anthropic said: ${apiReason(error)}`, "BILLING");
+  }
+  if (error instanceof Anthropic.APIError) return new HttpError(502, `Anthropic API error (${error.status ?? "unknown"}): ${apiReason(error)}`, "API");
   return new HttpError(500, error instanceof Error ? error.message : "Unexpected error", "INTERNAL");
 }
 

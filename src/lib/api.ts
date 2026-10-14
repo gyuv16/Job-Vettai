@@ -35,29 +35,50 @@ export async function api<T>(path: string, body: unknown): Promise<T> {
 }
 
 let statusCache: Promise<ServerStatus> | null = null;
+const statusListeners = new Set<(s: ServerStatus) => void>();
 
 export function fetchStatus(): Promise<ServerStatus> {
-  statusCache ??= fetch("/api/status")
+  statusCache ??= fetch("/api/status", { cache: "no-store" })
     .then((r) => r.json() as Promise<ServerStatus>)
-    .catch((): ServerStatus => ({ serverKey: false, serverWorkspace: "unset", accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [], commit: null, branch: null, environment: null }));
+    .catch((): ServerStatus => {
+      statusCache = null; // don't pin a transient failure for the rest of the session
+      return { serverKey: false, serverWorkspace: "unset", accessCodeRequired: false, defaultModel: "claude-opus-5-5", models: [], commit: null, branch: null, environment: null };
+    });
   return statusCache;
 }
 
-export type AiMode = "user-key" | "server-key" | "heuristic" | "loading";
+/** Re-read the deployment's configuration (e.g. after a redeploy) and update every useAiMode() user. */
+export async function refreshStatus(): Promise<ServerStatus> {
+  statusCache = null;
+  const s = await fetchStatus();
+  statusListeners.forEach((fn) => fn(s));
+  return s;
+}
 
-/** Which engine will answer: the visitor's key, the deployment's key, or the heuristic fallback. */
+export type AiMode = "user-key" | "server-key" | "locked" | "heuristic" | "loading";
+
+/**
+ * Which engine will answer: the visitor's key, the deployment's key, or the
+ * heuristic fallback. "locked" means the site key needs an access code that
+ * hasn't been entered, so pages fall back to heuristic mode instead of failing.
+ */
 export function useAiMode(): { mode: AiMode; status: ServerStatus | null } {
   const apiKey = useStore((s) => s.settings.apiKey);
+  const accessCode = useStore((s) => s.settings.accessCode);
   const [status, setStatus] = useState<ServerStatus | null>(null);
   useEffect(() => {
     let live = true;
-    fetchStatus().then((s) => live && setStatus(s));
+    const update = (s: ServerStatus) => live && setStatus(s);
+    statusListeners.add(update);
+    fetchStatus().then(update);
     return () => {
       live = false;
+      statusListeners.delete(update);
     };
   }, []);
   if (apiKey) return { mode: "user-key", status };
   if (!status) return { mode: "loading", status };
+  if (status.serverKey && status.accessCodeRequired && !accessCode) return { mode: "locked", status };
   return { mode: status.serverKey ? "server-key" : "heuristic", status };
 }
 
