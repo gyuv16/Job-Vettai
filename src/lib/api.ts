@@ -14,7 +14,7 @@ export class ApiError extends Error {
   }
 }
 
-/** How long the browser stays on the built-in engine after every AI engine was busy. */
+/** The longest the browser stays on the built-in engine after every AI engine was busy. */
 export const BUILT_IN_PAUSE_MS = 60 * 60 * 1000;
 
 /** POST JSON to one of our API routes, attaching the visitor's key/model/access code. */
@@ -32,14 +32,18 @@ export async function api<T>(path: string, body: unknown): Promise<T> {
   } catch {
     throw new ApiError("Network error. Check your connection and retry.", "NETWORK", 0);
   }
-  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  const data = (await res.json().catch(() => ({}))) as { error?: string; code?: string; restMs?: number };
   if (!res.ok) {
     // Keep the site working by switching this browser to the free built-in engine:
     // for good when the Anthropic credit is empty, for an hour when every AI engine is busy.
     const { settings, setSettings } = useStore.getState();
     if (settings.freeMode !== "manual") {
       if (data.code === "BILLING") setSettings({ freeMode: "billing" });
-      else if (data.code === "AI_UNAVAILABLE") setSettings({ freeMode: "limit", freeModeUntil: Date.now() + BUILT_IN_PAUSE_MS });
+      else if (data.code === "AI_UNAVAILABLE") {
+        // The server says how long: minutes after a per-minute limit, an hour after a daily one.
+        const rest = typeof data.restMs === "number" ? Math.min(Math.max(data.restMs, 60_000), BUILT_IN_PAUSE_MS) : BUILT_IN_PAUSE_MS;
+        setSettings({ freeMode: "limit", freeModeUntil: Date.now() + rest });
+      }
     }
     throw new ApiError(data.error ?? `Request failed (${res.status})`, data.code ?? "ERROR", res.status);
   }
@@ -83,7 +87,7 @@ function builtInReason(mode: AiMode, freeMode: Settings["freeMode"], until: numb
   if (mode === "free" && freeMode === "billing") return "The Anthropic credit ran out, so the built-in engine is in use. See Settings.";
   if (mode === "free") return "Built-in engine only is switched on in Settings.";
   if (mode === "locked") return "Enter this site's access code in Settings to use its AI.";
-  if (mode === "heuristic") return "Connect a free AI engine (Mistral or Groq) in Settings for AI.";
+  if (mode === "heuristic") return "This site has no AI engine set up yet: its owner can add a free MISTRAL_API_KEY or GROQ_API_KEY in Vercel, or you can add your own Claude key in Settings.";
   if (mode === "loading") return "Still checking which AI engine this site has; try again in a moment.";
   return "";
 }

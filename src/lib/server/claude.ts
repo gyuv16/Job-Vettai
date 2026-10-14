@@ -15,6 +15,8 @@ const FALLBACK_MODELS = new Set(["claude-opus-5-5", "claude-sonnet-5-5", "claude
 export type Effort = "low" | "medium" | "high";
 
 export class HttpError extends Error {
+  /** For AI_UNAVAILABLE: how long browsers should use the built-in engine before trying AI again. */
+  restMs?: number;
   constructor(
     public status: number,
     message: string,
@@ -304,7 +306,7 @@ export function handle(fn: (req: Request) => Promise<unknown>) {
     } catch (error) {
       const e = error instanceof HttpError ? error : toHttpError(error);
       if (e.status >= 500) console.error("[api]", e.code, e.message);
-      return Response.json({ error: e.message, code: e.code }, { status: e.status });
+      return Response.json({ error: e.message, code: e.code, ...(e.restMs ? { restMs: e.restMs } : {}) }, { status: e.status });
     }
   };
 }

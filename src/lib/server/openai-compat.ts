@@ -21,7 +21,10 @@ export interface Provider {
   /** System + user characters that fit the free tier's per-request budget. */
   maxInputChars: number;
   tokenParam: "max_tokens" | "max_completion_tokens";
-  extra: Record<string, unknown>;
+  /** Extra request fields for a given model. */
+  extra: (model: string) => Record<string, unknown>;
+  /** Whether the model enforces a JSON schema; others get JSON mode with the schema in the prompt. */
+  strictSchema: (model: string) => boolean;
   temperature?: number;
 }
 
@@ -40,7 +43,8 @@ export function freeProviders(): Provider[] {
       maxOutput: 8000,
       maxInputChars: 200_000,
       tokenParam: "max_tokens",
-      extra: {},
+      extra: () => ({}),
+      strictSchema: () => true, // every current Mistral chat model supports custom structured outputs
       temperature: 0.3,
     });
   }
@@ -56,11 +60,15 @@ export function freeProviders(): Provider[] {
       maxOutput: 3000,
       maxInputChars: 15_000,
       tokenParam: "max_completion_tokens",
-      extra: { reasoning_effort: "low" },
+      // Strict schemas and reasoning_effort "low" are gpt-oss features on Groq.
+      extra: (model) => (GPT_OSS.test(model) ? { reasoning_effort: "low" } : {}),
+      strictSchema: (model) => GPT_OSS.test(model),
     });
   }
   return list;
 }
+
+const GPT_OSS = /^openai\/gpt-oss/;
 
 function unique(xs: string[]): string[] {
   return [...new Set(xs)];
@@ -134,11 +142,11 @@ function statusError(p: Provider, res: Response, reason: string): EngineError {
   const said = reason ? ` ${p.label} said: ${reason}` : "";
   const s = res.status;
   if (s === 401) return new EngineError(401, `${p.label} rejected ${p.keyVar}. Check it in Vercel's environment variables, then redeploy.${said}`, "BAD_KEY", reason);
-  if (s === 403) return new EngineError(403, `${p.label} refused this key. Check the account is verified and the key is active.${said}`, "PERMISSION", reason);
+  if (s === 403) return new EngineError(403, `${p.label} refused this request: the account may not be verified, or the key's plan may not include this model.${said}`, "PERMISSION", reason);
   if (s === 404) return new EngineError(404, `${p.label} doesn't offer the requested model to this key.${said}`, "MODEL", reason);
   if (s === 413) return new EngineError(413, `The request is too large for ${p.label}'s free limit.${said}`, "TOO_LARGE", reason);
   if (s === 429) return new EngineError(429, `${p.label} is busy or this key has used its free quota for now.${said}`, "RATE_LIMIT", reason, retryAfter(res));
-  if (s === 402) return new EngineError(402, `${p.label} wants a paid plan for this request.${said}`, "QUOTA", reason);
+  if (s === 402) return new EngineError(402, `${p.label}'s free allowance is used up for now (Mistral's resets monthly), unless pay-as-you-go is turned on.${said}`, "QUOTA", reason);
   if (s === 400 && /json_validate_failed|failed to generate json|schema/i.test(reason)) return new EngineError(502, `${p.label} returned output that did not match the expected format.${said}`, "PARSE", reason);
   if (s === 400 || s === 422) return new EngineError(400, `${p.label} rejected the request.${said}`, "BAD_REQUEST", reason);
   return new EngineError(502, `${p.label} had a server error (${s}).${said}`, "API", reason);
@@ -167,10 +175,16 @@ async function once(p: Provider, model: string, o: CallOptions, timeoutMs: numbe
     model,
     messages: o.messages,
     [p.tokenParam]: Math.min(o.maxOutput, p.maxOutput),
-    ...p.extra,
+    ...p.extra(model),
     ...(p.temperature !== undefined ? { temperature: p.temperature } : {}),
   };
-  if (o.schema) body.response_format = { type: "json_schema", json_schema: { name: "result", schema: apiSchema(o.schema), strict: true } };
+  if (o.schema && p.strictSchema(model)) {
+    body.response_format = { type: "json_schema", json_schema: { name: "result", schema: apiSchema(o.schema), strict: true } };
+  } else if (o.schema) {
+    // JSON mode only guarantees valid JSON, so the schema goes in the prompt; zod still checks the result.
+    body.response_format = { type: "json_object" };
+    body.messages = o.messages.map((m, i) => (i === 0 && m.role === "system" ? { ...m, content: `${m.content}\n\nJSON schema to follow exactly:\n${JSON.stringify(apiSchema(o.schema!))}` } : m));
+  }
 
   // AbortSignal.timeout needs a whole, positive number of milliseconds.
   const signal = AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs)));
@@ -206,31 +220,47 @@ async function once(p: Provider, model: string, o: CallOptions, timeoutMs: numbe
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Try each of the provider's models in turn, within the deadline. */
-async function call(p: Provider, o: CallOptions): Promise<{ text: string; model: string }> {
+// Per-minute limits clear within a minute; anything longer (daily or monthly quota) isn't worth waiting for.
+const MAX_RATE_WAIT_MS = 65_000;
+const MAX_RATE_RETRIES = 2;
+
+/**
+ * Try each of the provider's models in turn, within the deadline. Each model has
+ * its own rate limit, so a rate-limited model hands over to the next one first;
+ * when every model is rate-limited, wait for the soonest per-minute reset that fits.
+ */
+async function call<R>(p: Provider, o: CallOptions, accept: (answer: { text: string; model: string }) => R): Promise<R> {
   let last: EngineError | undefined;
-  for (const model of o.persistent ? p.models : p.models.slice(0, 1)) {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const remaining = o.deadline - Date.now();
-      if (remaining < MIN_ATTEMPT_MS) throw last ?? new EngineError(504, `${p.label} had no time left to answer.`, "CONNECTION", "out of time");
-      try {
-        return await once(p, model, o, Math.min(remaining, ATTEMPT_CAP_MS));
-      } catch (error) {
-        last = error instanceof EngineError ? error : new EngineError(500, `${p.label}: unexpected error.`, "INTERNAL", error instanceof Error ? error.message.slice(0, 200) : "");
-        // Same key and host for every model: a rejected key won't work on the next one either, and with
-        // a backup engine waiting, a hung or unreachable host would only eat the time the backup needs.
-        if (last.code === "BAD_KEY" || last.code === "PERMISSION" || (last.code === "CONNECTION" && o.hasBackup) || !o.persistent) throw last;
-        // Free tiers allow about one request a second; a short wait usually clears it.
-        const wait = last.code === "RATE_LIMIT" ? (last.retryAfterMs ?? 1500) : -1;
-        if (attempt === 0 && wait >= 0 && wait <= 8000 && o.deadline - Date.now() > wait + 15_000) {
-          await sleep(wait);
-          continue;
-        }
-        break;
+  const queue = o.persistent ? [...p.models] : p.models.slice(0, 1);
+  const limited: Array<{ model: string; at: number }> = [];
+  let retries = 0;
+  for (;;) {
+    let model = queue.shift();
+    if (!model) {
+      limited.sort((a, b) => a.at - b.at);
+      const next = limited.shift();
+      const wait = next ? Math.max(1000, next.at - Date.now()) : Infinity;
+      if (!next || !o.persistent || retries >= MAX_RATE_RETRIES || wait > MAX_RATE_WAIT_MS || o.deadline - Date.now() < wait + 15_000) {
+        throw last ?? new EngineError(500, `${p.label}: no model configured.`, "INTERNAL");
       }
+      retries++;
+      await sleep(wait);
+      model = next.model;
+    }
+    const remaining = o.deadline - Date.now();
+    if (remaining < MIN_ATTEMPT_MS) throw last ?? new EngineError(504, `${p.label} had no time left to answer.`, "CONNECTION", "out of time");
+    try {
+      // Checking the answer inside the loop lets an unusable answer fall back to the next model too.
+      return accept(await once(p, model, o, Math.min(remaining, ATTEMPT_CAP_MS)));
+    } catch (error) {
+      last = error instanceof EngineError ? error : new EngineError(500, `${p.label}: unexpected error.`, "INTERNAL", error instanceof Error ? error.message.slice(0, 200) : "");
+      // Same key and host for every model: a rejected key won't work on the next one either, and with
+      // a backup engine waiting, a hung or unreachable host would only eat the time the backup needs.
+      if (last.code === "BAD_KEY" || (last.code === "CONNECTION" && o.hasBackup) || !o.persistent) throw last;
+      if (last.code === "RATE_LIMIT") limited.push({ model, at: Date.now() + (last.retryAfterMs ?? 1500) });
+      // Anything else (model missing, refused for this plan, bad output): try the next model.
     }
   }
-  throw last ?? new EngineError(500, `${p.label}: no model configured.`, "INTERNAL");
 }
 
 function fitMessages(p: Provider, system: string, rest: Message[]): Message[] {
@@ -265,19 +295,18 @@ function parseJson(p: Provider, text: string): unknown {
 
 export async function compatStructured<T extends z.ZodType>(p: Provider, { schema, system, user, deadline, hasBackup }: { schema: T; system: string; user: string; deadline: number; hasBackup?: boolean }): Promise<z.infer<T>> {
   const messages = fitMessages(p, `${system}\n\nReply with one JSON object that follows the response schema, and nothing else.`, [{ role: "user", content: user }]);
-  const { text } = await call(p, { messages, schema, maxOutput: p.maxOutput, deadline, persistent: true, hasBackup });
-  const parsed = schema.safeParse(parseJson(p, text));
-  if (!parsed.success) throw new EngineError(502, `${p.label} returned output that did not match the expected format.`, "PARSE", "schema mismatch");
-  return parsed.data;
+  return call(p, { messages, schema, maxOutput: p.maxOutput, deadline, persistent: true, hasBackup }, ({ text }) => {
+    const parsed = schema.safeParse(parseJson(p, text));
+    if (!parsed.success) throw new EngineError(502, `${p.label} returned output that did not match the expected format.`, "PARSE", "schema mismatch");
+    return parsed.data as z.infer<T>;
+  });
 }
 
 export async function compatChat(p: Provider, { system, messages, deadline, hasBackup }: { system: string; messages: ChatMessage[]; deadline: number; hasBackup?: boolean }): Promise<string> {
-  const { text } = await call(p, { messages: fitMessages(p, system, messages), maxOutput: 1500, deadline, persistent: true, hasBackup });
-  return text.trim();
+  return call(p, { messages: fitMessages(p, system, messages), maxOutput: 1500, deadline, persistent: true, hasBackup }, ({ text }) => text.trim());
 }
 
 /** Smallest real request, for Settings → Test AI connection. Uses the main model only. */
 export async function compatPing(p: Provider, deadline: number): Promise<{ model: string; reply: string }> {
-  const { text, model } = await call(p, { messages: [{ role: "user", content: "Reply with the single word OK." }], maxOutput: 300, deadline, persistent: false });
-  return { model, reply: text.trim().slice(0, 40) };
+  return call(p, { messages: [{ role: "user", content: "Reply with the single word OK." }], maxOutput: 300, deadline, persistent: false }, ({ text, model }) => ({ model, reply: text.trim().slice(0, 40) }));
 }

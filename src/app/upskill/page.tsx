@@ -19,7 +19,7 @@ const rampIndex = (demand: number) => Math.min(4, Math.floor(demand / 20));
 const LEVEL_LABEL: Record<SkillGap["currentLevel"], string> = { none: "Not yet", basic: "Basic", working: "Working", strong: "Strong" };
 
 export default function UpskillPage() {
-  const { mode } = useAiMode();
+  const { mode, why } = useAiMode();
   const profile = useStore((s) => s.profile);
   const jobs = useStore((s) => s.jobs);
   const applications = useStore((s) => s.applications);
@@ -40,6 +40,7 @@ export default function UpskillPage() {
 
   const run = async () => {
     if (!sources.length) return toast.error("Nothing to analyse", "Rank some jobs or track applications first.");
+    if (!isAi(mode) && report?.mode === "ai" && !window.confirm(`Replace the AI skill-gap report with a built-in one? ${why}`)) return;
     setBusy(true);
     try {
       let r: UpskillReport;

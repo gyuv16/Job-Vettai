@@ -56,6 +56,8 @@ function Interview() {
 
   const build = async () => {
     if (!app) return;
+    // While AI is unavailable, a rebuild would quietly swap the AI pack for a built-in one.
+    if (!isAi(mode) && pack?.mode === "ai" && !window.confirm(`Replace the AI prep pack with a built-in one? ${why}`)) return;
     setBusy(true);
     try {
       let p: InterviewPack;
@@ -311,13 +313,19 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
       const r = await api<{ reply: string }>("/api/interview/mock", { profile, company, role, stage, postingText: postingText.slice(0, 20000), messages: next });
       setMessages([...next, { role: "assistant", content: r.reply }]);
     } catch (e) {
+      // Give the answer back, so a failed turn never swallows what the candidate typed.
+      if (text === undefined) {
+        setMessages(messages);
+        setInput(content);
+      }
       toast.error("Interviewer unavailable", e instanceof Error ? e.message : String(e));
     } finally {
       setTyping(false);
     }
   };
 
-  if (!enabled) {
+  // A conversation in progress stays on screen (sending pauses) when AI goes away mid-interview.
+  if (!enabled && messages.length === 0) {
     return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body={`Practise with an AI interviewer who gives feedback after every answer. ${why}`} action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
   }
 
@@ -357,6 +365,11 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
         )}
         <div ref={endRef} />
       </div>
+      {!enabled && (
+        <p role="status" className="border-t border-line bg-[color-mix(in_oklab,var(--warning)_10%,transparent)] px-4 py-2.5 text-xs leading-relaxed text-muted">
+          The interview is paused. {why}
+        </p>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -376,9 +389,9 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
           placeholder={messages.length ? "Your answer… (Enter to send, Shift+Enter for a new line)" : "Start the interview first"}
           className="min-h-11 flex-1 resize-none"
           rows={1}
-          disabled={!messages.length || typing}
+          disabled={!messages.length || typing || !enabled}
         />
-        <Button type="submit" size="icon" className="h-11 w-11" disabled={!input.trim() || typing} aria-label="Send">
+        <Button type="submit" size="icon" className="h-11 w-11" disabled={!input.trim() || typing || !enabled} aria-label="Send">
           <Send className="h-4 w-4" />
         </Button>
       </form>

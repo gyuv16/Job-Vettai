@@ -9,3 +9,7 @@ next-env.d.ts
 .env*.local
 .DS_Store
 npm-debug.log*
+
+# Stray Python downloads from tooling
+*.whl
+__pycache__/

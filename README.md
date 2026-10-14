@@ -18,7 +18,7 @@ Everything can run for free, with no credit card anywhere:
 
 The site never asks for payment details.
 
-**When the free AI is busy.** Free tiers have per-minute and daily limits. If every AI engine is busy or has used its quota, the site switches that browser to the **built-in engine for one hour** instead of failing, then goes back to AI by itself. The same happens for good if an Anthropic balance runs out. You can also switch to the built-in engine yourself in Settings (**Built-in engine only**). After fixing a key, press **Test AI connection** in Settings; when an engine answers, AI switches back on.
+**When the free AI is busy.** Free tiers have per-minute, daily and (on Mistral) monthly limits. Short per-minute waits are sat out automatically. If every AI engine is still busy or out of quota, that request shows an error and the browser switches to the **built-in engine** for a few minutes (per-minute limits) up to an hour (daily or monthly limits, outages), then goes back to AI by itself. Saved AI results are never replaced by built-in ones without asking. The switch stays on if an Anthropic balance runs out, until the key is changed or removed. You can also switch to the built-in engine yourself in Settings (**Built-in engine only**). After fixing a key, press **Test AI connection** in Settings; when an engine answers, AI switches back on.
 
 ### Get the free AI keys (5 minutes)
 
@@ -59,7 +59,7 @@ The engine is chosen per request:
    - **Groq** (`GROQ_API_KEY`, free): `openai/gpt-oss-120b`, then `openai/gpt-oss-20b`. Groq's free tier allows about 8,000 tokens a minute, so very long inputs are trimmed in the middle to fit.
    - **Claude** (`ANTHROPIC_API_KEY`, paid), only if set.
    When one engine is busy, rate-limited or down, the next one answers.
-3. **The built-in engine** if none is available, or for an hour when all are busy: keyword-overlap scoring and template drafts, so the site is never broken.
+3. **The built-in engine** if none is available, or for a few minutes to an hour when all are busy: keyword-overlap scoring and template drafts, so the site is never broken.
 
 Mistral and Groq can't read PDFs directly, so the server extracts the PDF's text first (scanned, image-only PDFs need the CV pasted as text).
 
@@ -76,7 +76,7 @@ Job postings, CVs and web pages are always treated as untrusted data: the prompt
    | `MISTRAL_API_KEY` | Recommended (free) | Main AI engine. See [Get the free AI keys](#get-the-free-ai-keys-5-minutes). |
    | `GROQ_API_KEY` | Recommended (free) | Backup AI engine, used when Mistral is busy. |
    | `APP_ACCESS_CODE` | Recommended | Any passphrase. Visitors must enter it in Settings before the site's AI keys are used, so strangers can't use up your free quota (or credits). |
-   | `MISTRAL_MODEL`, `GROQ_MODEL` | Optional | Other models from the same provider. |
+   | `MISTRAL_MODEL`, `GROQ_MODEL` | Optional | Another model from the same provider. On Groq, `openai/gpt-oss-*` models get strict structured output; other Groq models use JSON mode, which is less reliable. |
    | `ANTHROPIC_API_KEY` | Optional (paid) | Your key from [console.anthropic.com](https://console.anthropic.com), tried after the free engines. |
    | `ANTHROPIC_WORKSPACE_ID` | Only if Anthropic asks for it | If you see "This API key is not scoped to a workspace", your key was created at organisation level. Set this to the workspace ID (`wrkspc_01…`, from Console → Settings → Workspaces), or create a new key inside a workspace instead. |
    | `ANTHROPIC_MODEL` | Optional | Defaults to `claude-opus-5-5`. Visitors can also pick a model in Settings. |
@@ -93,11 +93,15 @@ The AI routes set `maxDuration` up to 300 seconds; drafting with review and revi
 
 Open **Settings → Connection check** on your live site and press **Test AI connection**. It shows the deployed version, which variables are set (never their values), the engine order, and each engine's answer or exact error.
 
-**"The AI engines can't answer right now…"** Every engine was busy or out of its free quota. The browser uses the built-in engine for an hour and then retries AI by itself. If it keeps happening, add the second free engine (Mistral and Groq have separate limits), or set `APP_ACCESS_CODE` so only you use your quota.
+**"The AI engines can't answer right now (…)"** Every engine was busy, out of quota or down; the brackets give each engine's reason. The browser uses the built-in engine for the time the message states and then retries AI by itself. If it keeps happening, add the second free engine (Mistral and Groq have separate limits), or set `APP_ACCESS_CODE` so only you use your quota. A reason such as "key rejected" or "free allowance used up" needs fixing rather than waiting: see below.
+
+**"… free allowance used up"** Mistral's free plan has a monthly allowance; when it is spent, Mistral answers again next month (or turn on pay-as-you-go). Groq keeps working as the backup meanwhile.
+
+**"No AI engine could be used. Mistral: key rejected…"** Every configured key was refused. Check the keys in Vercel and redeploy; Settings → Test AI connection shows each engine's exact error.
 
 **"Mistral rejected MISTRAL_API_KEY" / "Groq rejected GROQ_API_KEY".** The key was mistyped, deleted or pasted with extra characters. Create a new key, update it in Vercel and redeploy.
 
-**"Your Anthropic credit balance is empty…"** Claude is paid. Add the free Mistral or Groq key instead, and delete `ANTHROPIC_API_KEY` if you don't want Claude.
+**"The Anthropic credit balance is empty…"** Claude is paid. Add the free Mistral or Groq key instead, and delete `ANTHROPIC_API_KEY` if you don't want Claude.
 
 **"This API key is not scoped to a workspace…"**
 

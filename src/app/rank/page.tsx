@@ -83,6 +83,12 @@ export default function RankPage() {
     setProgress({ done: 0, total: batch.length });
     let failed = 0;
     let builtIn = 0;
+    let keptAi = 0;
+    // The built-in engine never overwrites an AI score; it only fills jobs without one.
+    const builtInRank = (j: Job) => {
+      if (j.rank?.mode === "ai") keptAi++;
+      else setRank(j.key, heuristicRank(profile, j));
+    };
     try {
       if (isAi(mode)) {
         for (let i = 0; i < batch.length; i += 5) {
@@ -98,7 +104,7 @@ export default function RankPage() {
           } catch (e) {
             if (e instanceof ApiError && (e.code === "AI_UNAVAILABLE" || e.code === "BILLING")) {
               // This browser just switched to the built-in engine: finish the run with it rather than failing every batch left.
-              for (const j of batch.slice(i)) setRank(j.key, heuristicRank(profile, j));
+              batch.slice(i).forEach(builtInRank);
               builtIn = batch.length - i;
               toast.info("AI is busy, finished with the built-in engine", e.message);
               setProgress({ done: batch.length, total: batch.length });
@@ -112,13 +118,13 @@ export default function RankPage() {
       } else {
         for (let i = 0; i < batch.length; i++) {
           await new Promise((r) => setTimeout(r, 220));
-          setRank(batch[i].key, heuristicRank(profile, batch[i]));
+          builtInRank(batch[i]);
           setProgress({ done: i + 1, total: batch.length });
         }
       }
       const swept = sweep();
       const deferred = candidates.length - batch.length;
-      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, !isAi(mode) && `Built-in triage. ${why}`].filter(Boolean).join(" ") || undefined);
+      toast.success(`Ranked ${batch.length - failed} job${batch.length - failed === 1 ? "" : "s"}`, [swept && `${swept} expired by deadline.`, deferred > 0 && `${deferred} deferred to the next run.`, builtIn > 0 && `${builtIn} scored by the built-in engine.`, keptAi > 0 && `Kept ${keptAi} existing AI score${keptAi === 1 ? "" : "s"}.`, !isAi(mode) && `Built-in triage. ${why}`].filter(Boolean).join(" ") || undefined);
     } finally {
       setRunning(false);
     }

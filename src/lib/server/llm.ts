@@ -88,7 +88,7 @@ const TRANSIENT = new Set(["RATE_LIMIT", "QUOTA", "CONNECTION", "API", "BILLING"
 const SHORT: Record<string, string> = {
   RATE_LIMIT: "busy or out of free quota",
   BILLING: "credit balance empty",
-  QUOTA: "needs a paid plan",
+  QUOTA: "free allowance used up",
   CONNECTION: "not reachable or too slow",
   API: "server error",
   MAX_TOKENS: "answer cut off",
@@ -107,10 +107,22 @@ const SHORT: Record<string, string> = {
 
 function shortReason(e: HttpError): string {
   const base = SHORT[e.code] ?? e.message.slice(0, 120);
-  return e instanceof EngineError && e.reason ? `${base} (${e.reason.slice(0, 140)})` : base;
+  return e instanceof EngineError && e.reason ? `${base} (${e.reason.length > 90 ? `${e.reason.slice(0, 90)}…` : e.reason})` : base;
 }
 
-function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpError }>): HttpError {
+const HOUR = 60 * 60 * 1000;
+
+/**
+ * How long browsers should rest on the built-in engine: a couple of minutes when an
+ * engine only hit a per-minute limit (it reset soon), an hour for daily or monthly
+ * quotas, outages and anything without a hint.
+ */
+function restFor(failures: Array<{ error: HttpError }>): number {
+  const soon = failures.flatMap((f) => (f.error instanceof EngineError && f.error.code === "RATE_LIMIT" && f.error.retryAfterMs !== undefined && f.error.retryAfterMs <= 5 * 60_000 ? [f.error.retryAfterMs] : []));
+  return soon.length ? Math.max(2 * 60_000, Math.min(...soon)) : HOUR;
+}
+
+function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpError }>, kind: "structured" | "chat"): HttpError {
   // A lone Claude key keeps its own detailed message (an empty balance switches the browser to the built-in engine).
   if (list.length === 1 && list[0].kind === "claude") return failures[0].error;
   const input = failures.find((f) => INPUT.has(f.error.code));
@@ -120,7 +132,12 @@ function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpEr
     return new HttpError(502, `No AI engine could be used. ${summary}. Fix the key in Vercel → Settings → Environment Variables and redeploy. Settings → Test AI connection checks each engine.`, "AI_CONFIG");
   }
   if (failures.every((f) => TRANSIENT.has(f.error.code) || CONFIG.has(f.error.code))) {
-    return new HttpError(503, `The AI engines can't answer right now (${summary}). Job Vettai switched this browser to the free built-in engine for the next hour: your next try uses it, and AI comes back by itself.`, "AI_UNAVAILABLE");
+    const restMs = restFor(failures);
+    const span = restMs >= HOUR ? "the next hour" : `about ${Math.round(restMs / 60_000)} minutes`;
+    const next = kind === "chat" ? "Mock interviews need AI, so try this answer again after that; the rest of the site uses the free built-in engine meanwhile." : "Your next try uses it, and AI comes back by itself.";
+    const e = new HttpError(503, `The AI engines can't answer right now (${summary}). Job Vettai switched this browser to the free built-in engine for ${span}. ${next}`, "AI_UNAVAILABLE");
+    e.restMs = restMs;
+    return e;
   }
   // Something about this particular request (declined, unusable or cut-off answer): other requests may still work.
   return new HttpError(502, `The AI engines couldn't complete this request (${summary}). Try again; if it keeps failing, shorten the input.`, "AI_FAILED");
@@ -129,7 +146,7 @@ function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpEr
 // Time kept back for each engine still to come, so one slow engine can't starve the backup.
 const RESERVE_PER_ENGINE_MS = 40_000;
 
-async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, deadline: number, hasBackup: boolean) => Promise<R>): Promise<R> {
+async function runChain<R>(list: Engine[], budgetMs: number, kind: "structured" | "chat", run: (e: Engine, deadline: number, hasBackup: boolean) => Promise<R>): Promise<R> {
   const deadline = Date.now() + budgetMs;
   const failures: Array<{ engine: Engine; error: HttpError }> = [];
   for (const [i, e] of list.entries()) {
@@ -146,7 +163,7 @@ async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, de
       failures.push({ engine: e, error: toHttpError(error) });
     }
   }
-  throw combine(list, failures);
+  throw combine(list, failures, kind);
 }
 
 /** One structured-output call through the engine chain. Returns the schema-validated object. */
@@ -173,7 +190,7 @@ export async function structured<T extends z.ZodType>({
 }): Promise<z.infer<T>> {
   const list = engines(req);
   const text = flattener(user, pdfOptional);
-  return runChain(list, budgetMs, async (e, deadline, hasBackup) => {
+  return runChain(list, budgetMs, "structured", async (e, deadline, hasBackup) => {
     if (e.kind === "free") return compatStructured(e.provider, { schema, system, user: await text(), deadline, hasBackup });
     return claudeStructured(claudeCtx(e), { schema, system, user, effort, maxTokens, timeoutMs: list.length > 1 ? deadline - Date.now() : undefined });
   });
@@ -182,10 +199,17 @@ export async function structured<T extends z.ZodType>({
 /** Plain-text call through the engine chain (the mock interview chat). */
 export async function chat({ req, system, messages, effort = "low", budgetMs = 110_000 }: { req: Request; system: string; messages: ChatMessage[]; effort?: Effort; budgetMs?: number }): Promise<string> {
   const list = engines(req);
-  return runChain(list, budgetMs, async (e, deadline, hasBackup) => {
+  return runChain(list, budgetMs, "chat", async (e, deadline, hasBackup) => {
     if (e.kind === "free") return compatChat(e.provider, { system, messages, deadline, hasBackup });
     return claudeChat(claudeCtx(e), { system, messages, effort, timeoutMs: list.length > 1 ? deadline - Date.now() : undefined });
   });
+}
+
+/** The free way out of an empty Anthropic balance, if this site offers one. */
+function billingAlternative(source: KeySource): string {
+  const free = freeProviders().length > 0;
+  if (source === "server") return free ? ", or delete ANTHROPIC_API_KEY in Vercel to rely on the free engines" : ", or add a free MISTRAL_API_KEY or GROQ_API_KEY in Vercel";
+  return free || envVar("ANTHROPIC_API_KEY") ? ", or remove your key in Settings to use this site's AI" : "";
 }
 
 export interface EngineCheck {
@@ -219,7 +243,7 @@ export async function pingAll(req: Request): Promise<{ results: EngineCheck[] }>
         // The usual billing text says the browser was switched to the built-in engine; a test switches nothing.
         const message =
           h.code === "BILLING"
-            ? `The Anthropic credit balance is empty. Add credits in Anthropic Console → Plans & Billing, or ${e.label === "Claude" ? "delete ANTHROPIC_API_KEY in Vercel to rely on the free engines" : "remove your key in Settings to use this site's AI"}.`
+            ? `The Anthropic credit balance is empty. Add credits in Anthropic Console → Plans & Billing${billingAlternative(e.label === "Claude" ? "server" : "visitor")}.`
             : h.message;
         return { engine: e.id, label: e.label, ok: false, code: h.code, message, ms: Date.now() - t0 };
       }
