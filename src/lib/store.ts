@@ -175,7 +175,17 @@ export const useStore = create<State>()(
       removeApplication: (id) => set((s) => ({ applications: s.applications.filter((a) => a.id !== id) })),
 
       setUpskill: (r) => set({ upskill: r }),
-      setSettings: (p) => set((s) => ({ settings: { ...s.settings, ...p } })),
+      setSettings: (p) =>
+        set((s) => {
+          const next = { ...s.settings, ...p };
+          // A new or removed Claude key starts fresh: an automatic switch to the built-in engine
+          // (empty credit, busy engines) was about the previous setup.
+          if (p.apiKey !== undefined && p.apiKey !== s.settings.apiKey && p.freeMode === undefined && (next.freeMode === "billing" || next.freeMode === "limit")) {
+            next.freeMode = "off";
+            next.freeModeUntil = undefined;
+          }
+          return { settings: next };
+        }),
 
       importAll: (data) =>
         set((s) => ({

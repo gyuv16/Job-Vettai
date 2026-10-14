@@ -154,6 +154,8 @@ interface CallOptions {
   deadline: number;
   /** Retry the same model once after a short rate limit, and fall back to the next model. */
   persistent: boolean;
+  /** Another engine follows: on a hung or unreachable host, hand it the time instead of trying the smaller model. */
+  hasBackup?: boolean;
 }
 
 // One model attempt never takes more than this, so a hung engine still leaves time for the next one.
@@ -170,13 +172,15 @@ async function once(p: Provider, model: string, o: CallOptions, timeoutMs: numbe
   };
   if (o.schema) body.response_format = { type: "json_schema", json_schema: { name: "result", schema: apiSchema(o.schema), strict: true } };
 
+  // AbortSignal.timeout needs a whole, positive number of milliseconds.
+  const signal = AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs)));
   let res: Response;
   try {
     res = await fetch(`${p.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${p.key}`, "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+      signal,
       cache: "no-store",
     });
   } catch (error) {
@@ -213,9 +217,9 @@ async function call(p: Provider, o: CallOptions): Promise<{ text: string; model:
         return await once(p, model, o, Math.min(remaining, ATTEMPT_CAP_MS));
       } catch (error) {
         last = error instanceof EngineError ? error : new EngineError(500, `${p.label}: unexpected error.`, "INTERNAL", error instanceof Error ? error.message.slice(0, 200) : "");
-        // Same key and host for every model: a rejected key won't work on the next one either, and a
-        // hung or unreachable host would only eat the time the next engine needs.
-        if (last.code === "BAD_KEY" || last.code === "PERMISSION" || last.code === "CONNECTION" || !o.persistent) throw last;
+        // Same key and host for every model: a rejected key won't work on the next one either, and with
+        // a backup engine waiting, a hung or unreachable host would only eat the time the backup needs.
+        if (last.code === "BAD_KEY" || last.code === "PERMISSION" || (last.code === "CONNECTION" && o.hasBackup) || !o.persistent) throw last;
         // Free tiers allow about one request a second; a short wait usually clears it.
         const wait = last.code === "RATE_LIMIT" ? (last.retryAfterMs ?? 1500) : -1;
         if (attempt === 0 && wait >= 0 && wait <= 8000 && o.deadline - Date.now() > wait + 15_000) {
@@ -259,16 +263,16 @@ function parseJson(p: Provider, text: string): unknown {
   }
 }
 
-export async function compatStructured<T extends z.ZodType>(p: Provider, { schema, system, user, deadline }: { schema: T; system: string; user: string; deadline: number }): Promise<z.infer<T>> {
+export async function compatStructured<T extends z.ZodType>(p: Provider, { schema, system, user, deadline, hasBackup }: { schema: T; system: string; user: string; deadline: number; hasBackup?: boolean }): Promise<z.infer<T>> {
   const messages = fitMessages(p, `${system}\n\nReply with one JSON object that follows the response schema, and nothing else.`, [{ role: "user", content: user }]);
-  const { text } = await call(p, { messages, schema, maxOutput: p.maxOutput, deadline, persistent: true });
+  const { text } = await call(p, { messages, schema, maxOutput: p.maxOutput, deadline, persistent: true, hasBackup });
   const parsed = schema.safeParse(parseJson(p, text));
   if (!parsed.success) throw new EngineError(502, `${p.label} returned output that did not match the expected format.`, "PARSE", "schema mismatch");
   return parsed.data;
 }
 
-export async function compatChat(p: Provider, { system, messages, deadline }: { system: string; messages: ChatMessage[]; deadline: number }): Promise<string> {
-  const { text } = await call(p, { messages: fitMessages(p, system, messages), maxOutput: 1500, deadline, persistent: true });
+export async function compatChat(p: Provider, { system, messages, deadline, hasBackup }: { system: string; messages: ChatMessage[]; deadline: number; hasBackup?: boolean }): Promise<string> {
+  const { text } = await call(p, { messages: fitMessages(p, system, messages), maxOutput: 1500, deadline, persistent: true, hasBackup });
   return text.trim();
 }
 

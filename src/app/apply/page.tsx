@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { fadeUp, PageHeader, RadarChart, RadialGauge, stagger } from "@/components/motion/effects";
 import { toast } from "@/components/ui/overlay";
 import { Badge, Button, Card, CardHeader, cn, Field, Input, Select, Tabs, Textarea, type Tone } from "@/components/ui/primitives";
@@ -120,7 +120,11 @@ function ApplyStudio() {
 
   const savedJobs = useMemo(() => Object.values(jobs).filter((j) => j.status !== "expired").sort((a, b) => (b.rank?.overall ?? 0) - (a.rank?.overall ?? 0)), [jobs]);
 
+  // Bumped by every evaluation run and by "New application", so a slow failed run can't restore stale results.
+  const runRef = useRef(0);
+
   const reset = () => {
+    runRef.current++;
     setPosting(EMPTY_POSTING);
     setEvaluation(null);
     setDrafts(null);
@@ -134,13 +138,15 @@ function ApplyStudio() {
   // AI work for this application, on screen or saved: built-in output shouldn't replace it without asking.
   const hasAiWork = (what: "evaluation" | "drafts"): boolean => {
     const saved = appId ? applications.find((a) => a.id === appId) : undefined;
-    return what === "evaluation" ? evaluation?.mode === "ai" || saved?.evaluation?.mode === "ai" || hasAiWork("drafts") : drafts?.mode === "ai" || saved?.drafts?.mode === "ai";
+    return what === "evaluation" ? evaluation?.mode === "ai" || saved?.evaluation?.mode === "ai" : drafts?.mode === "ai" || saved?.drafts?.mode === "ai";
   };
 
   const evaluate = async () => {
     if (!isAi(mode) && hasAiWork("evaluation") && !window.confirm(`Replace the AI evaluation with a built-in estimate? ${why}`)) return;
     let p = { ...posting };
     const before = { evaluation, drafts };
+    const run = ++runRef.current;
+    let evaluated = false;
     setBusy("evaluate");
     setEvaluation(null);
     setDrafts(null);
@@ -163,6 +169,7 @@ function ApplyStudio() {
         ? await api<Evaluation>("/api/apply/evaluate", { profile, posting: p })
         : (await new Promise((r) => setTimeout(r, 700)), heuristicEvaluate(profile, p.text, { company: p.company, role: p.role, location: p.location }));
       setEvaluation(ev);
+      evaluated = true;
       mark("evaluate", "done");
 
       const payload = { company: ev.company || p.company, role: ev.role || p.role, url: p.url, location: ev.location || p.location, postingText: p.text, hostCheck: hc, evaluation: ev, fitScore: ev.overall, deadline: ev.deadline, jobKey: jobKey || null };
@@ -170,9 +177,11 @@ function ApplyStudio() {
       else setAppId(createApplication({ ...payload, status: "draft", channel: jobKey ? jobs[jobKey]?.source ?? "" : p.url ? hc.host : "Direct" }));
     } catch (e) {
       setSteps((s) => ({ ...s, parse: s.parse === "active" ? "error" : s.parse, evaluate: s.evaluate === "active" ? "error" : s.evaluate }));
-      // A failed re-run keeps the previous results on screen.
-      setEvaluation(before.evaluation);
-      setDrafts(before.drafts);
+      // A failed re-run keeps the previous results on screen, unless the screen has moved on since.
+      if (runRef.current === run && !evaluated) {
+        setEvaluation(before.evaluation);
+        setDrafts(before.drafts);
+      }
       toast.error("Evaluation failed", e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);

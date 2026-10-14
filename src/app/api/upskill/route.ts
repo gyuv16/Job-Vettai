@@ -2,7 +2,7 @@ import { z } from "zod";
 import { handle, readJson } from "@/lib/server/claude";
 import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
-import { profileBrief, system } from "@/lib/server/prompts";
+import { profileBrief, system, untrusted } from "@/lib/server/prompts";
 import { UpskillSchema } from "@/lib/server/schemas";
 
 export const maxDuration = 300;
@@ -19,6 +19,6 @@ const TASK = `Analyse the gap between the candidate's profile and the jobs they 
 
 export const POST = handle(async (req) => {
   const { profile, sources } = await readJson(req, Body);
-  const block = sources.map((s, i) => `## Job ${i + 1}: ${s.label} (fit ${s.score ?? "unknown"})\nRecorded gaps: ${s.gaps.join("; ") || "(none)"}\n<untrusted_job_posting>\n${s.excerpt}\n</untrusted_job_posting>`).join("\n\n");
+  const block = sources.map((s, i) => `## Job ${i + 1}: ${s.label} (fit ${s.score ?? "unknown"})\nRecorded gaps: ${s.gaps.join("; ") || "(none)"}\n${untrusted("job_posting", s.excerpt)}`).join("\n\n");
   return structured({ req, schema: UpskillSchema, system: system(TASK), user: `${profileBrief(profile)}\n\n# Targeted jobs\n${block}`, effort: "medium" });
 });

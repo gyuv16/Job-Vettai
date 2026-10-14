@@ -3,7 +3,7 @@ import { clampScore, isIsoDate, overallScore, today, verdictFor } from "@/lib/fr
 import { handle, readJson } from "@/lib/server/claude";
 import { structured } from "@/lib/server/llm";
 import { profileInput } from "@/lib/server/inputs";
-import { FRAMEWORK, profileBrief, system } from "@/lib/server/prompts";
+import { FRAMEWORK, profileBrief, system, untrusted } from "@/lib/server/prompts";
 import { RankSchema } from "@/lib/server/schemas";
 import { linkedInDetail } from "@/lib/server/sources";
 import type { RankResult } from "@/lib/types";
@@ -30,6 +30,7 @@ const Body = z.object({
 const TASK = `Triage-score job postings against the candidate's profile using the framework below. This is triage from the posting text only: no company research. Score only from the posting text you are given; if a posting is empty or clearly closed, return status "expired" with zero scores rather than guessing from the title.`;
 
 export const POST = handle(async (req) => {
+  const started = Date.now();
   const { profile, jobs } = await readJson(req, Body);
 
   // Hydrate LinkedIn cards (search results carry no description) like /rank's fetch step.
@@ -47,7 +48,7 @@ export const POST = handle(async (req) => {
   let scored: Array<{ key: string; expired: boolean; rank?: RankResult; description: string | null }> = [];
   if (scorable.length) {
     const postings = scorable
-      .map((j, i) => `## Posting ${i + 1}\nkey: ${j.key}\nTitle: ${j.title}\nCompany: ${j.company}\nLocation: ${j.location}\n<untrusted_job_posting>\n${(j.description ?? "").slice(0, 7000)}\n</untrusted_job_posting>`)
+      .map((j, i) => `## Posting ${i + 1}\nkey: ${j.key}\nTitle: ${j.title}\nCompany: ${j.company}\nLocation: ${j.location}\n${untrusted("job_posting", (j.description ?? "").slice(0, 7000))}`)
       .join("\n\n");
     const out = await structured({
       req,
@@ -55,7 +56,7 @@ export const POST = handle(async (req) => {
       system: system(TASK),
       user: `${FRAMEWORK}\n\n${profileBrief(profile)}\n\n# Postings to score (return one result per key)\n${postings}`,
       effort: "low",
-      budgetMs: 250_000, // LinkedIn hydration above already used some of maxDuration
+      budgetMs: 270_000 - (Date.now() - started), // LinkedIn hydration above already used part of maxDuration
     });
     const byKey = new Map(out.results.map((r) => [r.key, r]));
     // Positional fallback if the model mangled a key; a job with no result is reported unscored, never expired.

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { handle, HttpError, readJson } from "@/lib/server/claude";
 import { structured } from "@/lib/server/llm";
-import { system } from "@/lib/server/prompts";
+import { system, untrusted } from "@/lib/server/prompts";
 import { ProfileSchema } from "@/lib/server/schemas";
 
 export const maxDuration = 300;
@@ -23,7 +23,7 @@ export const POST = handle(async (req) => {
   }
   content.push({
     type: "text",
-    text: `<untrusted_cv>\n${(b.text ?? "(see attached PDF)").slice(0, 60000)}\n</untrusted_cv>${b.notes ? `\n\nCandidate's own notes:\n${b.notes}` : ""}\n\nReturn the structured profile.`,
+    text: `${untrusted("cv", (b.text ?? "(see attached PDF)").slice(0, 60000))}${b.notes ? `\n\nCandidate's own notes:\n${b.notes}` : ""}\n\nReturn the structured profile.`,
   });
   return structured({ req, schema: ProfileSchema, system: system(TASK), user: content, effort: "low", pdfOptional: !!b.text?.trim() });
 });

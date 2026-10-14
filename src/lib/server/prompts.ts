@@ -71,13 +71,19 @@ ${UNTRUSTED_RULE}
 ${HONESTY_RULE}`;
 }
 
+/**
+ * Wrap third-party text (postings, CVs) in its untrusted tag. Look-alike tags inside
+ * the text are neutralised, so it can't close the block early and pass as instructions.
+ */
+export function untrusted(tag: string, text: string): string {
+  return `<untrusted_${tag}>\n${text.replace(/<(\/?)(\s*)untrusted_/gi, "‹$1$2untrusted_")}\n</untrusted_${tag}>`;
+}
+
 export function postingBlock(text: string, meta?: { url?: string; company?: string; role?: string; location?: string }): string {
   const head = [meta?.url && `Source URL: ${meta.url}`, meta?.company && `Company (as given): ${meta.company}`, meta?.role && `Role (as given): ${meta.role}`, meta?.location && `Location (as given): ${meta.location}`]
     .filter(Boolean)
     .join("\n");
-  return `<untrusted_job_posting>
-${head ? head + "\n\n" : ""}${text.slice(0, 18000)}
-</untrusted_job_posting>`;
+  return untrusted("job_posting", `${head ? head + "\n\n" : ""}${text.slice(0, 18000)}`);
 }
 
 export const WRITING_STYLE = `# Writing rules

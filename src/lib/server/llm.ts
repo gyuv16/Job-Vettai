@@ -19,6 +19,7 @@ import {
 } from "./claude";
 import { compatChat, compatPing, compatStructured, EngineError, freeProviders, type Provider } from "./openai-compat";
 import { pdfToText } from "./pdf";
+import { untrusted } from "./prompts";
 
 // Every AI route goes through here. The engine order is:
 //   1. the visitor's own Claude key, if they saved one in Settings (and only that);
@@ -67,7 +68,7 @@ async function flatten(user: UserContent, pdfOptional: boolean): Promise<string>
     if (b.type === "text") parts.push(b.text);
     else if (b.type === "document" && b.source.type === "base64" && b.source.media_type === "application/pdf") {
       try {
-        parts.push(`Attached PDF (text extracted):\n<untrusted_cv_pdf>\n${(await pdfToText(b.source.data)).slice(0, 60000)}\n</untrusted_cv_pdf>`);
+        parts.push(`Attached PDF (text extracted):\n${untrusted("cv_pdf", (await pdfToText(b.source.data)).slice(0, 60000))}`);
       } catch (error) {
         if (!pdfOptional || !(error instanceof HttpError) || !INPUT.has(error.code)) throw error;
         parts.push("(The attached PDF has no readable text, so use the pasted CV text below.)");
@@ -128,7 +129,7 @@ function combine(list: Engine[], failures: Array<{ engine: Engine; error: HttpEr
 // Time kept back for each engine still to come, so one slow engine can't starve the backup.
 const RESERVE_PER_ENGINE_MS = 40_000;
 
-async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, deadline: number) => Promise<R>): Promise<R> {
+async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, deadline: number, hasBackup: boolean) => Promise<R>): Promise<R> {
   const deadline = Date.now() + budgetMs;
   const failures: Array<{ engine: Engine; error: HttpError }> = [];
   for (const [i, e] of list.entries()) {
@@ -138,9 +139,9 @@ async function runChain<R>(list: Engine[], budgetMs: number, run: (e: Engine, de
       continue;
     }
     const later = list.length - i - 1;
-    const reserve = later ? Math.min(later * RESERVE_PER_ENGINE_MS, remaining / 2) : 0;
+    const reserve = later ? Math.min(later * RESERVE_PER_ENGINE_MS, Math.floor(remaining / 2)) : 0;
     try {
-      return await run(e, deadline - reserve);
+      return await run(e, deadline - reserve, later > 0);
     } catch (error) {
       failures.push({ engine: e, error: toHttpError(error) });
     }
@@ -172,8 +173,8 @@ export async function structured<T extends z.ZodType>({
 }): Promise<z.infer<T>> {
   const list = engines(req);
   const text = flattener(user, pdfOptional);
-  return runChain(list, budgetMs, async (e, deadline) => {
-    if (e.kind === "free") return compatStructured(e.provider, { schema, system, user: await text(), deadline });
+  return runChain(list, budgetMs, async (e, deadline, hasBackup) => {
+    if (e.kind === "free") return compatStructured(e.provider, { schema, system, user: await text(), deadline, hasBackup });
     return claudeStructured(claudeCtx(e), { schema, system, user, effort, maxTokens, timeoutMs: list.length > 1 ? deadline - Date.now() : undefined });
   });
 }
@@ -181,8 +182,8 @@ export async function structured<T extends z.ZodType>({
 /** Plain-text call through the engine chain (the mock interview chat). */
 export async function chat({ req, system, messages, effort = "low", budgetMs = 110_000 }: { req: Request; system: string; messages: ChatMessage[]; effort?: Effort; budgetMs?: number }): Promise<string> {
   const list = engines(req);
-  return runChain(list, budgetMs, async (e, deadline) => {
-    if (e.kind === "free") return compatChat(e.provider, { system, messages, deadline });
+  return runChain(list, budgetMs, async (e, deadline, hasBackup) => {
+    if (e.kind === "free") return compatChat(e.provider, { system, messages, deadline, hasBackup });
     return claudeChat(claudeCtx(e), { system, messages, effort, timeoutMs: list.length > 1 ? deadline - Date.now() : undefined });
   });
 }

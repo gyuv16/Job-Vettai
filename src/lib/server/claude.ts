@@ -133,8 +133,8 @@ export async function claudeStructured<T extends z.ZodType>(ctx: ClaudeCtx, { sc
         output_config: { effort, format: { type: "json_schema", schema: apiSchema(schema) } },
         ...(useFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       },
-      // In a chain the deadline is shared: SDK retries would each get a fresh full timeout and overrun maxDuration.
-      timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : undefined,
+      // In a chain the deadline is shared: each SDK attempt gets a fresh timeout, so one signal bounds the retries too.
+      timeoutMs ? { timeout: timeoutMs, signal: AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs))) } : undefined,
     );
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "Claude declined this request. Try rephrasing the input.", "REFUSAL");
@@ -176,8 +176,8 @@ export async function claudeChat(
         output_config: { effort },
         ...(useFallback ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const } : {}),
       },
-      // In a chain the deadline is shared: SDK retries would each get a fresh full timeout and overrun maxDuration.
-      timeoutMs ? { timeout: timeoutMs, maxRetries: 0 } : undefined,
+      // In a chain the deadline is shared: each SDK attempt gets a fresh timeout, so one signal bounds the retries too.
+      timeoutMs ? { timeout: timeoutMs, signal: AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs))) } : undefined,
     );
     if (response.stop_reason === "refusal") {
       throw new HttpError(422, "Claude declined this message. Try rephrasing.", "REFUSAL");
@@ -249,7 +249,7 @@ const BILLING_REASON = /credit balance|purchase credits|plans & billing|billing/
 function billingError(reason: string, ctx?: KeyContext): HttpError {
   const next =
     ctx?.source === "visitor"
-      ? "To use this site's free AI instead, remove your key in Settings. To keep using Claude, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings."
+      ? `${envVar("MISTRAL_API_KEY") || envVar("GROQ_API_KEY") ? "To use this site's free AI instead, remove your key in Settings. " : ""}To keep using Claude, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings.`
       : "For free AI with no card, add MISTRAL_API_KEY or GROQ_API_KEY in Vercel (see the README). To use Claude later, add credits in Anthropic Console → Plans & Billing, then press Test AI connection in Settings.";
   return new HttpError(402, `The Anthropic credit balance is empty, so Claude can't answer. Job Vettai has switched this browser to the free built-in engine, which your next try will use. ${next} Anthropic said: ${reason}`, "BILLING");
 }
@@ -288,6 +288,7 @@ export function toHttpError(error: unknown, ctx?: KeyContext): HttpError {
     }
     return new HttpError(400, `Anthropic API rejected the request: ${error.message}`, "BAD_REQUEST");
   }
+  if (error instanceof Anthropic.APIUserAbortError) return new HttpError(504, "Claude didn't answer in time.", "CONNECTION");
   if (error instanceof Anthropic.APIConnectionError) return new HttpError(502, "Could not reach the Anthropic API.", "CONNECTION");
   if (error instanceof Anthropic.APIError && error.status === 402) return billingError(apiReason(error), ctx);
   if (error instanceof Anthropic.APIError) return new HttpError(502, `Anthropic API error (${error.status ?? "unknown"}): ${apiReason(error)}`, "API");

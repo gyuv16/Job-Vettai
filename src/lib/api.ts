@@ -84,6 +84,7 @@ function builtInReason(mode: AiMode, freeMode: Settings["freeMode"], until: numb
   if (mode === "free") return "Built-in engine only is switched on in Settings.";
   if (mode === "locked") return "Enter this site's access code in Settings to use its AI.";
   if (mode === "heuristic") return "Connect a free AI engine (Mistral or Groq) in Settings for AI.";
+  if (mode === "loading") return "Still checking which AI engine this site has; try again in a moment.";
   return "";
 }
 

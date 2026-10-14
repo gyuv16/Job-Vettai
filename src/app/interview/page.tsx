@@ -318,7 +318,7 @@ function MockInterview({ company, role, stage, postingText, enabled, why }: { co
   };
 
   if (!enabled) {
-    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body={`${why} Then practise with an AI interviewer who gives feedback after every answer.`} action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
+    return <EmptyState icon={<Bot className="h-7 w-7" />} title="Mock interviews need AI" body={`Practise with an AI interviewer who gives feedback after every answer. ${why}`} action={<Link href="/settings"><Button>Open Settings</Button></Link>} />;
   }
 
   return (
